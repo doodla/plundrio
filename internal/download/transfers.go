@@ -252,6 +252,7 @@ func (p *TransferProcessor) logAllTransfersDetails() {
 // processReadyTransfers handles completed and seeding transfers
 func (p *TransferProcessor) processReadyTransfers() {
 	readyTransfers := append(p.transfers["COMPLETED"], p.transfers["SEEDING"]...)
+	now := time.Now()
 
 	for _, transfer := range readyTransfers {
 		select {
@@ -260,6 +261,15 @@ func (p *TransferProcessor) processReadyTransfers() {
 			return
 		default:
 			if p.isTransferBeingProcessed(transfer.ID) {
+				continue
+			}
+			if !CanStartDownloadNow(p.manager.cfg.DownloadStartWindow, now) {
+				log.Debug("transfers").
+					Int64("transfer_id", transfer.ID).
+					Str("transfer_name", transfer.Name).
+					Str("window_start", p.manager.cfg.DownloadStartWindow.Start).
+					Str("window_end", p.manager.cfg.DownloadStartWindow.End).
+					Msg("Skipping local download start because current time is outside the configured window")
 				continue
 			}
 			p.startTransferProcessing(transfer)
