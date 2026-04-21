@@ -35,6 +35,7 @@ var runCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Initialize Viper
 		viper.SetEnvPrefix("PLDR")
+		viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
 		viper.AutomaticEnv()
 
 		configFile, _ := cmd.Flags().GetString("config")
@@ -66,12 +67,20 @@ var runCmd = &cobra.Command{
 		oauthToken := viper.GetString("token")
 		listenAddr := viper.GetString("listen")
 		workerCount := viper.GetInt("workers")
+		downloadStartWindow := config.DownloadStartWindowConfig{
+			Enabled: viper.GetBool("download_start_window.enabled"),
+			Start:   viper.GetString("download_start_window.start"),
+			End:     viper.GetString("download_start_window.end"),
+		}
 
 		log.Debug("config").
 			Str("target_dir", targetDir).
 			Str("putio_folder", putioFolder).
 			Str("listen_addr", listenAddr).
 			Int("workers", workerCount).
+			Bool("download_start_window_enabled", downloadStartWindow.Enabled).
+			Str("download_start_window_start", downloadStartWindow.Start).
+			Str("download_start_window_end", downloadStartWindow.End).
 			Msg("Configuration loaded")
 
 		// Validate required configuration values
@@ -102,11 +111,16 @@ var runCmd = &cobra.Command{
 
 		// Initialize configuration
 		cfg := &config.Config{
-			TargetDir:   targetDir,
-			PutioFolder: putioFolder,
-			OAuthToken:  oauthToken,
-			ListenAddr:  listenAddr,
-			WorkerCount: workerCount,
+			TargetDir:           targetDir,
+			PutioFolder:         putioFolder,
+			OAuthToken:          oauthToken,
+			ListenAddr:          listenAddr,
+			WorkerCount:         workerCount,
+			DownloadStartWindow: downloadStartWindow,
+		}
+
+		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
+			log.Fatal("config").Err(err).Msg("Invalid download start window configuration")
 		}
 
 		// Initialize Put.io API client
@@ -181,10 +195,16 @@ folder: "plundrio"					# Folder name on Put.io
 token: "" 									# Get a token with get-token
 listen: ":9091"							# Transmission RPC server address
 workers: 4									# Number of download workers
+download_start_window:       # Optional local download start window
+  enabled: false
+  start: "23:00"
+  end: "05:00"
 log_level: "info"					  # Log level (trace,debug,info,warn,error,fatal,panic,none,pretty)
 
 # Environment variables:
-# PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS, PLDR_LOG_LEVEL
+# PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
+# PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
+# PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
 `
 
 		outputPath := "plundrio-config.yaml"

@@ -238,8 +238,14 @@ folder: "plundrio"             # Folder name on put.io
 token: ""                      # Put.io OAuth token (prefer env var)
 listen: ":9091"                # Transmission RPC server address
 workers: 4                     # Number of download workers
+download_start_window:         # Optional local download start window
+  enabled: false
+  start: "23:00"
+  end: "05:00"
 log_level: "info"              # Log level (trace,debug,info,warn,error,fatal,panic,none,pretty)
 ```
+
+`download_start_window` only gates when plundrio may begin a new local download. It does not stop Put.io transfers from being created, and it does not interrupt downloads that are already in progress.
 
 2. **Command-line flags** (see full list with `plundrio run --help`)
 
@@ -251,6 +257,9 @@ export PLDR_TOKEN=your-putio-token
 export PLDR_FOLDER=plundrio
 export PLDR_LISTEN=:9091
 export PLDR_WORKERS=4
+export PLDR_DOWNLOAD_START_WINDOW_ENABLED=true
+export PLDR_DOWNLOAD_START_WINDOW_START=23:00
+export PLDR_DOWNLOAD_START_WINDOW_END=05:00
 export PLDR_LOG_LEVEL=info
 ```
 

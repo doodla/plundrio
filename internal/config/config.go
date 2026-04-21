@@ -1,5 +1,13 @@
 package config
 
+// DownloadStartWindowConfig gates when new local downloads may begin.
+// It only affects the start of local downloads, not ongoing transfers.
+type DownloadStartWindowConfig struct {
+	Enabled bool
+	Start   string
+	End     string
+}
+
 // Config holds the runtime configuration
 type Config struct {
 	// TargetDir is where completed downloads will be stored
@@ -19,4 +27,7 @@ type Config struct {
 
 	// WorkerCount is the number of concurrent download workers (default: 4)
 	WorkerCount int
+
+	// DownloadStartWindow optionally restricts when new local downloads may start.
+	DownloadStartWindow DownloadStartWindowConfig
 }
