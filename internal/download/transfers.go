@@ -344,15 +344,20 @@ func (p *TransferProcessor) processTransfer(transfer *putio.Transfer) {
 	}
 }
 
-// handleTransferError processes transfer errors appropriately
+// handleTransferError processes transfer errors appropriately.
+//
+// A 404 here means we re-discovered a transfer whose files plundrio already
+// deleted (typically across a container restart). Without this branch the
+// transfer would loop on every poll: GetAllTransferFiles → 404 → log → repeat.
+// We treat it as the orphan-recovery path and run the cleanup hook to delete
+// the dead transfer record.
 func (p *TransferProcessor) handleTransferError(transfer *putio.Transfer, err error) {
-	if putioErr, ok := err.(*putio.ErrorResponse); ok && putioErr.Type == "NotFound" {
-		log.Debug("transfers").
+	if isNotFoundError(err) {
+		log.Info("transfers").
 			Str("name", transfer.Name).
 			Int64("id", transfer.ID).
-			Msg("Files no longer exist on Put.io, cleaning up")
+			Msg("Files no longer exist on Put.io, cleaning up orphan transfer")
 
-		// Initialize transfer context before cleanup
 		p.initializeTransfer(transfer, 0)
 		p.manager.cleanupTransfer(transfer.ID)
 		return

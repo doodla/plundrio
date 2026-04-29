@@ -1,7 +1,11 @@
 package download
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+
+	"github.com/elsbrock/go-putio"
 )
 
 // DownloadError is the base error type for download-related errors
@@ -37,4 +41,15 @@ func NewNoFilesFoundError(transferID int64) error {
 		Type:    "NoFilesFound",
 		Message: fmt.Sprintf("No files found for transfer %d", transferID),
 	}
+}
+
+// isNotFoundError reports whether err is a put.io API 404. The API client
+// wraps errors with fmt.Errorf("...: %w", err), so direct type assertion
+// fails — errors.As walks the chain.
+func isNotFoundError(err error) bool {
+	var putioErr *putio.ErrorResponse
+	if !errors.As(err, &putioErr) || putioErr.Response == nil {
+		return false
+	}
+	return putioErr.Response.StatusCode == http.StatusNotFound
 }

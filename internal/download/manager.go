@@ -112,27 +112,61 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		m.processor.MarkTransferProcessed(transferID)
 	})
 
-	// Register cleanup hooks
+	// Register cleanup hooks.
+	//
+	// After local download completes (or when we discover an orphan transfer
+	// whose files are already gone), delete both the put.io file and the
+	// transfer record. Keeping the transfer record around — as upstream did —
+	// causes an orphan-poll loop after a container restart: the transfer
+	// reappears in GetTransfers as COMPLETED/SEEDING, plundrio tries to fetch
+	// its files, gets 404, and loops every TransferCheckInterval. The file is
+	// already deleted, so put.io can't seed it anyway; the transfer record is
+	// dead weight either way.
 	m.coordinator.RegisterCleanupHook(func(transferID int64) error {
 		state, ok := m.coordinator.GetTransferContext(transferID)
 		if !ok {
 			return NewTransferNotFoundError(transferID)
 		}
 
-		// Delete only the source file from Put.io, but keep the transfer
 		if err := m.client.DeleteFile(m.Context(), state.FileID); err != nil {
+			if isNotFoundError(err) {
+				// Orphan-recovery path: the file was already deleted on a
+				// previous run. Proceed to transfer cleanup anyway.
+				log.Debug("cleanup").
+					Int64("transfer_id", transferID).
+					Int64("file_id", state.FileID).
+					Msg("Source file already gone")
+			} else {
+				log.Error("cleanup").
+					Int64("transfer_id", transferID).
+					Int64("file_id", state.FileID).
+					Err(err).
+					Msg("Failed to delete source file")
+				return err
+			}
+		} else {
+			log.Info("cleanup").
+				Int64("transfer_id", transferID).
+				Msg("Deleted source file")
+		}
+
+		if err := m.client.DeleteTransfer(m.Context(), transferID); err != nil {
+			if isNotFoundError(err) {
+				log.Debug("cleanup").
+					Int64("transfer_id", transferID).
+					Msg("Transfer already gone")
+				return nil
+			}
 			log.Error("cleanup").
 				Int64("transfer_id", transferID).
-				Int64("file_id", state.FileID).
 				Err(err).
-				Msg("Failed to delete source file")
+				Msg("Failed to delete transfer")
 			return err
 		}
 
 		log.Info("cleanup").
 			Int64("transfer_id", transferID).
-			Msg("Deleted source file")
-
+			Msg("Deleted transfer")
 		return nil
 	})
 
