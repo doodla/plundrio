@@ -2,10 +2,12 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	grab "github.com/cavaliergopher/grab/v3"
@@ -92,30 +94,51 @@ func (m *Manager) downloadWithRetry(state *DownloadState) error {
 	return fmt.Errorf("failed after %d attempts, last error: %w", maxRetries, lastErr)
 }
 
-// isTransientError determines if an error is potentially recoverable
+// isTransientError determines if an error is potentially recoverable.
+//
+// grab returns errors that wrap a chain of net.OpError → os.SyscallError →
+// syscall.Errno. Mid-stream connection drops surface as text like
+// `Get "https://...": read tcp ...:443: read: connection reset by peer`,
+// which an exact-string check on "connection reset" would miss. We match
+// at two layers: errors.Is against the underlying syscall errno, and
+// substring fallback against the formatted message.
 func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check for cancellation errors - these should be passed through
+	// Cancellation must short-circuit and not be retried.
 	if downloadErr, ok := err.(*DownloadError); ok && downloadErr.Type == "DownloadCancelled" {
 		return false
 	}
 
-	// Check for grab errors
-	if err.Error() == "connection reset" ||
-		err.Error() == "connection refused" ||
-		err.Error() == "i/o timeout" {
+	// Wrapped syscall errors via the standard error chain.
+	if errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ETIMEDOUT) ||
+		errors.Is(err, syscall.EPIPE) {
 		return true
 	}
 
-	// Check for specific grab HTTP errors
-	if strings.Contains(err.Error(), "429") || // Too Many Requests
-		strings.Contains(err.Error(), "503") || // Service Unavailable
-		strings.Contains(err.Error(), "504") || // Gateway Timeout
-		strings.Contains(err.Error(), "502") { // Bad Gateway
-		return true
+	msg := err.Error()
+	transientMessages := []string{
+		"connection reset",
+		"connection refused",
+		"i/o timeout",
+		"broken pipe",
+		"unexpected EOF",
+	}
+	for _, m := range transientMessages {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+
+	// Retryable HTTP status codes from grab's response error.
+	for _, code := range []string{"429", "502", "503", "504"} {
+		if strings.Contains(msg, code) {
+			return true
+		}
 	}
 
 	return false
