@@ -265,6 +265,51 @@ func (tc *TransferCoordinator) CompleteTransfer(transferID int64) error {
 	return nil
 }
 
+// RequeueFailedTransfer transitions a transfer from Failed back to Downloading
+// so the file enumeration + queue path can run again. Used by
+// processFailedTransfers when a transient failure (CDN reset, network blip)
+// left the transfer stuck in Failed despite put.io having the data.
+//
+// Preserves completedFiles and downloadedSize so already-on-disk files are
+// skipped via shouldDownloadFile's size check on the requeued attempt.
+//
+// Refuses the transition if any worker for the previous attempt has not yet
+// reported (completed+failed < TotalFiles): zeroing failedFiles while a late
+// FileCompleted is in flight would push completedFiles >= TotalFiles with
+// failedFiles==0, falsely triggering the Completed transition and the
+// cleanup hook (which deletes the put.io file) under the requeued workers.
+func (tc *TransferCoordinator) RequeueFailedTransfer(transferID int64) error {
+	ctx, ok := tc.GetTransferContext(transferID)
+	if !ok {
+		return NewTransferNotFoundError(transferID)
+	}
+
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	if ctx.state != TransferLifecycleFailed {
+		return fmt.Errorf("invalid state transition: %s -> Downloading (requeue)", ctx.state)
+	}
+
+	if ctx.completedFiles+ctx.failedFiles < ctx.TotalFiles {
+		return fmt.Errorf("requeue refused: workers still in flight (completed=%d, failed=%d, total=%d)",
+			ctx.completedFiles, ctx.failedFiles, ctx.TotalFiles)
+	}
+
+	ctx.state = TransferLifecycleDownloading
+	ctx.failedFiles = 0
+	ctx.err = nil
+
+	log.Info("transfer").
+		Int64("id", transferID).
+		Str("name", ctx.Name).
+		Int32("completed", ctx.completedFiles).
+		Int32("total", ctx.TotalFiles).
+		Msg("Requeued failed transfer for local retry")
+
+	return nil
+}
+
 // FailTransfer marks a transfer as failed
 func (tc *TransferCoordinator) FailTransfer(transferID int64, err error) error {
 	ctx, ok := tc.GetTransferContext(transferID)

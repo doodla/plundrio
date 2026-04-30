@@ -352,6 +352,198 @@ func TestCoordinatorCompleteTransferNotFound(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRequeueFailedTransfer(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	ctx := tc.InitiateTransfer(1, "test", 100, 3)
+	if err := tc.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+
+	// 1 success, 2 failures -> Failed state with completed+failed == total
+	if err := tc.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+
+	// Set an err on the context to verify it's cleared.
+	if err := tc.FailTransfer(1, errors.New("CDN reset")); err != nil {
+		t.Fatalf("FailTransfer: %v", err)
+	}
+
+	if ctx.GetState() != TransferLifecycleFailed {
+		t.Fatalf("precondition: expected Failed state, got %s", ctx.GetState())
+	}
+
+	if err := tc.RequeueFailedTransfer(1); err != nil {
+		t.Fatalf("RequeueFailedTransfer: %v", err)
+	}
+
+	if ctx.GetState() != TransferLifecycleDownloading {
+		t.Errorf("state = %s, want Downloading", ctx.GetState())
+	}
+	completed, failed, _ := ctx.GetCounters()
+	if completed != 1 {
+		t.Errorf("completed = %d, want 1 (preserved across requeue)", completed)
+	}
+	if failed != 0 {
+		t.Errorf("failed = %d, want 0 (zeroed on requeue)", failed)
+	}
+	if ctx.GetError() != nil {
+		t.Errorf("err = %v, want nil after requeue", ctx.GetError())
+	}
+}
+
+func TestCoordinatorRequeueFailedTransferRejectsNonFailed(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(tc *TransferCoordinator)
+	}{
+		{
+			name: "Initial",
+			setup: func(tc *TransferCoordinator) {
+				tc.InitiateTransfer(1, "t", 100, 1)
+			},
+		},
+		{
+			name: "Downloading",
+			setup: func(tc *TransferCoordinator) {
+				tc.InitiateTransfer(1, "t", 100, 1)
+				_ = tc.StartDownload(1)
+			},
+		},
+		{
+			name: "Completed",
+			setup: func(tc *TransferCoordinator) {
+				tc.InitiateTransfer(1, "t", 100, 1)
+				_ = tc.StartDownload(1)
+				_ = tc.FileCompleted(1)
+			},
+		},
+		{
+			name: "Processed",
+			setup: func(tc *TransferCoordinator) {
+				tc.InitiateTransfer(1, "t", 100, 1)
+				_ = tc.StartDownload(1)
+				_ = tc.FileCompleted(1)
+				_ = tc.CompleteTransfer(1)
+			},
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestManager()
+			tt.setup(m.coordinator)
+
+			err := m.coordinator.RequeueFailedTransfer(1)
+			if err == nil {
+				t.Fatalf("expected error requeueing from %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestCoordinatorRequeueFailedTransferRejectsInflightWorkers(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	tc.InitiateTransfer(1, "test", 100, 3)
+	if err := tc.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+
+	// One file fails -> state goes Failed but completed+failed (0+1) < total (3).
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+
+	err := tc.RequeueFailedTransfer(1)
+	if err == nil {
+		t.Fatal("expected requeue to be refused while workers are in flight")
+	}
+}
+
+func TestCoordinatorRequeueFailedTransferNotFound(t *testing.T) {
+	m := newTestManager()
+
+	err := m.coordinator.RequeueFailedTransfer(999)
+	if err == nil {
+		t.Fatal("expected error for unknown transfer")
+	}
+	var dlErr *DownloadError
+	if !errors.As(err, &dlErr) || dlErr.Type != "TransferNotFound" {
+		t.Errorf("expected TransferNotFound error, got: %v", err)
+	}
+}
+
+func TestCoordinatorRequeueAfterMixedFailure(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	// 3 files: 1 succeeds, 2 fail. Confirm requeue zeros failed and preserves completed=1.
+	tc.InitiateTransfer(1, "test", 100, 3)
+	if err := tc.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	if err := tc.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+
+	if err := tc.RequeueFailedTransfer(1); err != nil {
+		t.Fatalf("RequeueFailedTransfer: %v", err)
+	}
+
+	ctx, _ := tc.GetTransferContext(1)
+	completed, failed, total := ctx.GetCounters()
+	if completed != 1 || failed != 0 || total != 3 {
+		t.Errorf("counters = (%d, %d, %d), want (1, 0, 3)", completed, failed, total)
+	}
+}
+
+func TestCoordinatorGetCounters(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	tc.InitiateTransfer(1, "test", 100, 5)
+	if err := tc.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	if err := tc.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := tc.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := tc.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+
+	ctx, _ := tc.GetTransferContext(1)
+	completed, failed, total := ctx.GetCounters()
+	if completed != 2 {
+		t.Errorf("completed = %d, want 2", completed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
+	}
+	if total != 5 {
+		t.Errorf("total = %d, want 5", total)
+	}
+}
+
 func TestCoordinatorCompleteTransferFromProcessedStateErrors(t *testing.T) {
 	m := newTestManager()
 	tc := m.coordinator
