@@ -170,6 +170,16 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		return nil
 	})
 
+	// Drop any localRetryState for this transfer once it's processed
+	// successfully. Without this, processFailedTransfers leaks an entry per
+	// retried transfer for the lifetime of the process. Lookup-only callers
+	// (Permanent check, etc.) tolerate the absence — LoadOrStore re-creates
+	// a zero-value state if needed.
+	m.coordinator.RegisterCleanupHook(func(transferID int64) error {
+		m.processor.failedRetryStates.Delete(transferID)
+		return nil
+	})
+
 	return m
 }
 

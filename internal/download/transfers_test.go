@@ -559,6 +559,54 @@ func TestProcessFailedTransfersDoesNotTriggerCleanupForOnDiskFiles(t *testing.T)
 	}
 }
 
+// TestProcessFailedTransfersClearsRetryStateOnSuccess verifies the
+// cleanup-hook entry that prunes failedRetryStates. Without it, every
+// retried transfer leaves a *localRetryState behind in the sync.Map for
+// the life of the process — unbounded growth on a long-running daemon.
+func TestProcessFailedTransfersClearsRetryStateOnSuccess(t *testing.T) {
+	targetDir := t.TempDir()
+	transferName := "test-transfer"
+	fileName := "file.bin"
+	fileSize := int64(50)
+
+	// Plant the file on disk so queueTransferFiles short-circuits to
+	// FileCompleted and CompleteTransfer fires synchronously in the
+	// dispatch goroutine.
+	if err := os.MkdirAll(filepath.Join(targetDir, transferName), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, transferName, fileName), make([]byte, fileSize), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	client := &fakePutioClient{
+		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+			return []*putio.File{{ID: 200, Name: fileName, Size: fileSize}}, nil
+		},
+	}
+	m := newTestManagerWithClientAndTargetDir(client, targetDir)
+
+	driveTransferToFailed(t, m, 1, 1)
+	setPutioTransfers(m.processor, &putio.Transfer{
+		ID:     1,
+		Name:   transferName,
+		FileID: 999,
+		Status: "COMPLETED",
+	})
+
+	m.processor.processFailedTransfersAt(time.Now())
+	m.workerWg.Wait()
+
+	if _, ok := m.processor.failedRetryStates.Load(int64(1)); ok {
+		t.Errorf("failedRetryStates still contains entry for transfer 1; expected cleanup hook to have removed it")
+	}
+
+	ctx, _ := m.coordinator.GetTransferContext(1)
+	if ctx.GetState() != TransferLifecycleProcessed {
+		t.Errorf("state = %s, want Processed (precondition for cleanup-hook firing)", ctx.GetState())
+	}
+}
+
 // TestProcessFailedTransfersStaysFailedOnGetFilesError exercises the
 // dispatchRequeue ordering rule: if GetAllTransferFiles errors, the transfer
 // must remain in Failed with completed+failed == total so the in-flight
