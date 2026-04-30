@@ -11,7 +11,7 @@
   outputs = { self, nixpkgs, flake-utils, gomod2nix }:
     let
       pname = "plundrio";
-      version = "0.10.7";
+      version = "0.10.8";
       description = "A Put.io integration for *arr applications";
       maintainer = {
         name = "Simon Elsbrock";
@@ -174,6 +174,11 @@
           modules = ./gomod2nix.toml;
           pwd = ./.;
           subPackages = [ "cmd/${pname}" ];
+
+          # Pin Go's toolchain selection to whatever Nix provides. Without
+          # this, go.mod's `toolchain` directive triggers a network download
+          # at build time, which fails inside Nix's sandboxed build.
+          env.GOTOOLCHAIN = "local";
 
           # Modified ldflags to work with pure Go builds
           ldflags = [
