@@ -158,11 +158,10 @@ func TestProcessFailedTransfersDefersWhenWorkersInFlight(t *testing.T) {
 	m.processor.processFailedTransfersAt(time.Now())
 	m.workerWg.Wait()
 
-	// Should have created the retry state (LoadOrStore happens before invariant
-	// check), but Count must still be 0.
-	rs := getRetryStateForTest(t, m.processor, 1)
-	if rs.Count != 0 {
-		t.Errorf("Count = %d, want 0 (no bump while workers in flight)", rs.Count)
+	// Invariant check now runs before LoadOrStore, so no retry-state entry
+	// should have been created during the worker-drain window.
+	if _, ok := m.processor.failedRetryStates.Load(int64(1)); ok {
+		t.Errorf("failedRetryStates created entry while workers were in flight; should have deferred before LoadOrStore")
 	}
 	ctx, _ := m.coordinator.GetTransferContext(1)
 	if ctx.GetState() != TransferLifecycleFailed {

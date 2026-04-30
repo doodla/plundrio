@@ -633,19 +633,11 @@ func (p *TransferProcessor) processFailedTransfersAt(now time.Time) {
 // retry cascade. Called only from processFailedTransfersAt on the monitor
 // goroutine, so direct mutation of *localRetryState is safe.
 func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContext, now time.Time) {
-	rsValue, _ := p.failedRetryStates.LoadOrStore(id, &localRetryState{})
-	rs := rsValue.(*localRetryState)
-
-	// Terminal: stop processing this transfer entirely. Cleared only on
-	// process restart (failedRetryStates is in-memory only).
-	if rs.Permanent {
-		return
-	}
-
 	// In-flight invariant: completed+failed must equal total before we touch
 	// the context. RequeueFailedTransfer enforces this too, but checking here
-	// avoids bumping retry counters or calling put.io while a late
-	// FileCompleted from the previous attempt is still in flight.
+	// avoids bumping retry counters, calling put.io, or stamping an empty
+	// localRetryState into the map while a late FileCompleted from the
+	// previous attempt is still in flight.
 	completed, failed, total := ctx.GetCounters()
 	if completed+failed < total {
 		log.Debug("transfers").
@@ -653,6 +645,15 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 			Str("name", ctx.Name).
 			Int32("completed", completed).Int32("failed", failed).Int32("total", total).
 			Msg("Failed transfer has workers in flight, deferring retry")
+		return
+	}
+
+	rsValue, _ := p.failedRetryStates.LoadOrStore(id, &localRetryState{})
+	rs := rsValue.(*localRetryState)
+
+	// Terminal: stop processing this transfer entirely. Cleared only on
+	// process restart (failedRetryStates is in-memory only).
+	if rs.Permanent {
 		return
 	}
 
