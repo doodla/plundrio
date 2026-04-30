@@ -597,12 +597,11 @@ func (p *TransferProcessor) MarkTransferProcessed(transferID int64) {
 		Msg("Marked transfer as processed locally")
 }
 
-// processFailedTransfers re-queues transfers stuck in TransferLifecycleFailed
-// after downloadWithRetry exhausted its in-attempt retries. Without this loop,
-// the "kept for retry" state from FileFailure is aspirational — nothing else
-// re-pulls from put.io once the worker gives up. The cascade is documented on
-// the localRetryState struct and in the project plan: short backoff loop ->
-// put.io RetryTransfer fallback -> one final local retry -> permanent fail.
+// processFailedTransfers drives the local retry cascade for transfers in
+// TransferLifecycleFailed. Cascade per transfer: up to maxLocalRetryAttempts
+// local requeues with localRetryBackoff between them, then one put.io
+// RetryTransfer fallback, then a single post-fallback local retry on
+// recovery, then Permanent. State per transfer lives in failedRetryStates.
 func (p *TransferProcessor) processFailedTransfers() {
 	p.processFailedTransfersAt(time.Now())
 }
@@ -734,7 +733,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 		}
 		rs.PutioFallback = true
 		rs.PutioFallbackAt = now
-		// DO NOT reset Count. Branch A handles all post-fallback transitions.
+		// Count is preserved here; Branch A reads it to gate post-fallback transitions.
 		return
 	}
 
