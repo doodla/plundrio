@@ -1,6 +1,8 @@
 package download
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,10 +17,42 @@ type TransferProcessor struct {
 	manager            *Manager
 	transfers          map[string][]*putio.Transfer // Status -> Transfers
 	processedTransfers sync.Map                     // map[int64]bool - Tracks transfers that have been processed locally
-	retryAttempts      sync.Map                     // map[int64]int - Tracks retry attempts for errored transfers
+	retryAttempts      sync.Map                     // map[int64]int - Tracks retry attempts for put.io ERROR transfers (processErroredTransfers)
+	failedRetryStates  sync.Map                     // map[int64]*localRetryState - Tracks local retry attempts for TransferLifecycleFailed transfers (processFailedTransfers)
 	folderID           int64
 	targetDir          string
 }
+
+// localRetryState tracks a single failed transfer's progress through the
+// local-retry cascade in processFailedTransfers. All mutations happen on the
+// monitor goroutine (single-threaded — see manager.go monitorTransfers), so no
+// internal locking is needed. Stored as *localRetryState in failedRetryStates
+// so the cascade can mutate fields in place.
+type localRetryState struct {
+	Count                int       // local retry attempts; capped at maxLocalRetryAttempts
+	LastAttempt          time.Time // when we last requeued (drives backoff window)
+	PutioFallback        bool      // true once client.RetryTransfer has been called
+	PutioFallbackAt      time.Time // when fallback fired (gates next post-fallback action)
+	PutioFallbackRetried bool      // true once a post-fallback local requeue has run
+	Permanent            bool      // terminal — short-circuits all further processing for this transfer
+}
+
+// localRetryBackoff is the delay between local requeues, indexed by Count-1
+// (Count==0 is the immediate first retry).
+var localRetryBackoff = []time.Duration{
+	5 * time.Minute,
+	30 * time.Minute,
+	2 * time.Hour,
+}
+
+// maxLocalRetryAttempts is the number of local retries before falling back to
+// put.io's RetryTransfer. Must equal len(localRetryBackoff).
+const maxLocalRetryAttempts = 3
+
+// putioFallbackWait is how long to wait after calling client.RetryTransfer
+// before checking put.io status and deciding whether to do one final local
+// requeue or mark the transfer permanently failed.
+const putioFallbackWait = 30 * time.Minute
 
 // GetTransfers returns a copy of all transfers for a given folder ID
 func (p *TransferProcessor) GetTransfers() []*putio.Transfer {
@@ -106,6 +140,7 @@ func (p *TransferProcessor) checkTransfers() {
 
 	// Process transfers by status
 	p.processReadyTransfers()
+	p.processFailedTransfers()
 	p.processErroredTransfers()
 
 	// Check for transfers that are in "Completed" state but haven't been fully cleaned up
@@ -560,6 +595,206 @@ func (p *TransferProcessor) MarkTransferProcessed(transferID int64) {
 	log.Debug("transfers").
 		Int64("transfer_id", transferID).
 		Msg("Marked transfer as processed locally")
+}
+
+// processFailedTransfers re-queues transfers stuck in TransferLifecycleFailed
+// after downloadWithRetry exhausted its in-attempt retries. Without this loop,
+// the "kept for retry" state from FileFailure is aspirational — nothing else
+// re-pulls from put.io once the worker gives up. The cascade is documented on
+// the localRetryState struct and in the project plan: short backoff loop ->
+// put.io RetryTransfer fallback -> one final local retry -> permanent fail.
+func (p *TransferProcessor) processFailedTransfers() {
+	p.processFailedTransfersAt(time.Now())
+}
+
+// processFailedTransfersAt is a testable seam for processFailedTransfers. The
+// codebase has no clock abstraction; this is a one-off testability hook, not
+// a new pattern.
+func (p *TransferProcessor) processFailedTransfersAt(now time.Time) {
+	type candidate struct {
+		id  int64
+		ctx *TransferContext
+	}
+	var candidates []candidate
+
+	p.manager.coordinator.RangeTransfers(func(id int64, ctx *TransferContext) bool {
+		if ctx.GetState() == TransferLifecycleFailed {
+			candidates = append(candidates, candidate{id, ctx})
+		}
+		return true
+	})
+
+	for _, c := range candidates {
+		p.tryRetryFailedTransfer(c.id, c.ctx, now)
+	}
+}
+
+// tryRetryFailedTransfer advances a single Failed transfer through the local
+// retry cascade. Called only from processFailedTransfersAt on the monitor
+// goroutine, so direct mutation of *localRetryState is safe.
+func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContext, now time.Time) {
+	rsValue, _ := p.failedRetryStates.LoadOrStore(id, &localRetryState{})
+	rs := rsValue.(*localRetryState)
+
+	// Terminal: stop processing this transfer entirely. Cleared only on
+	// process restart (failedRetryStates is in-memory only).
+	if rs.Permanent {
+		return
+	}
+
+	// In-flight invariant: completed+failed must equal total before we touch
+	// the context. RequeueFailedTransfer enforces this too, but checking here
+	// avoids bumping retry counters or calling put.io while a late
+	// FileCompleted from the previous attempt is still in flight.
+	completed, failed, total := ctx.GetCounters()
+	if completed+failed < total {
+		log.Debug("transfers").
+			Int64("id", id).
+			Str("name", ctx.Name).
+			Int32("completed", completed).Int32("failed", failed).Int32("total", total).
+			Msg("Failed transfer has workers in flight, deferring retry")
+		return
+	}
+
+	// Confirm the put.io transfer still exists. Without it, requeueing is
+	// pointless — GetAllTransferFiles will 404.
+	putioTransfer := p.findPutioTransferByID(id)
+	if putioTransfer == nil {
+		log.Warn("transfers").
+			Int64("id", id).Str("name", ctx.Name).
+			Msg("Failed transfer no longer present on put.io, marking permanently failed")
+		_ = p.manager.coordinator.FailTransfer(id, errors.New("transfer no longer present on put.io"))
+		rs.Permanent = true
+		return
+	}
+
+	// Branch A: post-fallback handling. Either we requeue once more (if put.io
+	// recovered) or we give up.
+	if rs.PutioFallback {
+		if rs.PutioFallbackRetried {
+			// Already used our one post-fallback local retry and we're back
+			// in Failed. Game over.
+			log.Error("transfers").
+				Int64("id", id).Str("name", ctx.Name).
+				Msg("Local retries and put.io fallback exhausted, marking permanently failed")
+			_ = p.manager.coordinator.FailTransfer(id, errors.New("retries exhausted post put.io fallback"))
+			rs.Permanent = true
+			return
+		}
+		// Wait the post-fallback window before re-checking put.io status.
+		if now.Before(rs.PutioFallbackAt.Add(putioFallbackWait)) {
+			return
+		}
+		// put.io has had time to redeliver. Check its status.
+		if putioTransfer.Status != "COMPLETED" && putioTransfer.Status != "SEEDING" {
+			log.Error("transfers").
+				Int64("id", id).Str("name", ctx.Name).Str("putio_status", putioTransfer.Status).
+				Msg("put.io fallback did not recover transfer, marking permanently failed")
+			_ = p.manager.coordinator.FailTransfer(id, fmt.Errorf("put.io status %s after fallback", putioTransfer.Status))
+			rs.Permanent = true
+			return
+		}
+		// put.io is ready — one final local requeue.
+		log.Info("transfers").
+			Int64("id", id).Str("name", ctx.Name).
+			Msg("put.io fallback succeeded, requeueing locally one final time")
+		rs.PutioFallbackRetried = true
+		rs.LastAttempt = now
+		p.dispatchRequeue(id, ctx, putioTransfer)
+		return
+	}
+
+	// Branch B: backoff window for normal local retries. Count==0 falls
+	// through (immediate first retry).
+	if rs.Count > 0 {
+		// Count-1 indexes the schedule. Safe because Count <= maxLocalRetryAttempts here.
+		nextEligible := rs.LastAttempt.Add(localRetryBackoff[rs.Count-1])
+		if now.Before(nextEligible) {
+			log.Debug("transfers").
+				Int64("id", id).Str("name", ctx.Name).
+				Int("local_retry_count", rs.Count).Time("next_eligible", nextEligible).
+				Msg("Failed transfer waiting for backoff window")
+			return
+		}
+	}
+
+	// Branch C: budget exhausted — fall back to put.io.
+	if rs.Count >= maxLocalRetryAttempts {
+		log.Warn("transfers").
+			Int64("id", id).Str("name", ctx.Name).Int("local_retry_count", rs.Count).
+			Msg("Local retries exhausted, falling back to put.io RetryTransfer")
+		if _, err := p.manager.client.RetryTransfer(p.manager.Context(), id); err != nil {
+			log.Error("transfers").
+				Int64("id", id).Err(err).
+				Msg("put.io RetryTransfer call failed")
+			// Don't permanently fail yet; setting PutioFallback below means
+			// we'll wait the full window before the next action (which can
+			// re-evaluate based on put.io status).
+		}
+		rs.PutioFallback = true
+		rs.PutioFallbackAt = now
+		// DO NOT reset Count. Branch A handles all post-fallback transitions.
+		return
+	}
+
+	// Branch D: within local retry budget — requeue.
+	rs.Count++
+	rs.LastAttempt = now
+	log.Info("transfers").
+		Int64("id", id).Str("name", ctx.Name).
+		Int("local_retry_attempt", rs.Count).Int("max", maxLocalRetryAttempts).
+		Msg("Re-queueing failed transfer for local retry")
+	p.dispatchRequeue(id, ctx, putioTransfer)
+}
+
+// dispatchRequeue performs the coordinator state flip and runs the file-fetch
+// + queue work in a goroutine. The async dispatch keeps the monitor loop
+// responsive: queueTransferFiles can block on m.jobs when the channel is full
+// (workerCount * BufferMultiple buffered).
+func (p *TransferProcessor) dispatchRequeue(id int64, ctx *TransferContext, putioTransfer *putio.Transfer) {
+	if err := p.manager.coordinator.RequeueFailedTransfer(id); err != nil {
+		// Race: state moved from Failed under us. The in-flight invariant
+		// check above should prevent this in practice; treat as benign.
+		log.Debug("transfers").
+			Int64("id", id).Err(err).
+			Msg("RequeueFailedTransfer no-op, state changed under us")
+		return
+	}
+
+	p.manager.workerWg.Add(1)
+	go func() {
+		defer p.manager.workerWg.Done()
+		files, err := p.manager.client.GetAllTransferFiles(p.manager.Context(), putioTransfer.FileID)
+		if err != nil {
+			log.Error("transfers").Int64("id", id).Err(err).Msg("Retry: GetAllTransferFiles failed")
+			// Drop back to Failed; the next monitor tick will re-evaluate
+			// per backoff.
+			_ = p.manager.coordinator.FailTransfer(id, err)
+			return
+		}
+		if len(files) == 0 {
+			_ = p.manager.coordinator.FailTransfer(id, NewNoFilesFoundError(id))
+			return
+		}
+		queued := p.queueTransferFiles(putioTransfer, files)
+		if queued == 0 {
+			// Everything was already on disk — finalize.
+			_ = p.manager.coordinator.CompleteTransfer(id)
+		}
+	}()
+}
+
+// findPutioTransferByID searches the cached put.io transfer list (populated
+// by the most recent checkTransfers run) for a given ID.
+func (p *TransferProcessor) findPutioTransferByID(id int64) *putio.Transfer {
+	for _, byStatus := range p.transfers {
+		for _, t := range byStatus {
+			if t.ID == id {
+				return t
+			}
+		}
+	}
+	return nil
 }
 
 // finalizeCompletedTransfers checks for transfers that are marked as completed in the
