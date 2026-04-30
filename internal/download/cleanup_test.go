@@ -20,18 +20,34 @@ type fakePutioClient struct {
 
 	deleteFileCalls     []int64
 	deleteTransferCalls []int64
+	retryTransferCalls  []int64
 
 	deleteFileErr     error
 	deleteTransferErr error
+
+	// Optional programmable hooks for tests that need richer behavior
+	// (transfers_test.go uses these to drive the failed-retry cascade).
+	getAllTransferFilesFn func(fileID int64) ([]*putio.File, error)
+	retryTransferFn       func(transferID int64) (*putio.Transfer, error)
 }
 
 func (f *fakePutioClient) GetTransfers(ctx context.Context) ([]*putio.Transfer, error) {
 	return nil, nil
 }
 func (f *fakePutioClient) GetAllTransferFiles(ctx context.Context, fileID int64) ([]*putio.File, error) {
+	if f.getAllTransferFilesFn != nil {
+		return f.getAllTransferFilesFn(fileID)
+	}
 	return nil, nil
 }
 func (f *fakePutioClient) RetryTransfer(ctx context.Context, transferID int64) (*putio.Transfer, error) {
+	f.mu.Lock()
+	f.retryTransferCalls = append(f.retryTransferCalls, transferID)
+	fn := f.retryTransferFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(transferID)
+	}
 	return nil, nil
 }
 func (f *fakePutioClient) GetDownloadURL(ctx context.Context, fileID int64) (string, error) {
