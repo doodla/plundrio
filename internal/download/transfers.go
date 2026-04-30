@@ -747,33 +747,45 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 	p.dispatchRequeue(id, ctx, putioTransfer)
 }
 
-// dispatchRequeue performs the coordinator state flip and runs the file-fetch
-// + queue work in a goroutine. The async dispatch keeps the monitor loop
-// responsive: queueTransferFiles can block on m.jobs when the channel is full
+// dispatchRequeue runs the file-fetch + coordinator state flip + queue work in
+// a goroutine. The async dispatch keeps the monitor loop responsive:
+// queueTransferFiles can block on m.jobs when the channel is full
 // (workerCount * BufferMultiple buffered).
+//
+// Order matters: GetAllTransferFiles runs before RequeueFailedTransfer so a
+// put.io API failure leaves the transfer in Failed with the in-flight
+// invariant intact (completed+failed == total). If we flipped to Downloading
+// first and then errored, FailTransfer wouldn't bump failedFiles, so the
+// invariant check in tryRetryFailedTransfer would gate every future tick and
+// the transfer would be stuck Failed forever.
+//
+// Note: rs.Count and rs.LastAttempt are mutated by the caller on the monitor
+// goroutine *before* this function is invoked, so backoff is respected even
+// if GetAllTransferFiles is slow.
 func (p *TransferProcessor) dispatchRequeue(id int64, ctx *TransferContext, putioTransfer *putio.Transfer) {
-	if err := p.manager.coordinator.RequeueFailedTransfer(id); err != nil {
-		// Race: state moved from Failed under us. The in-flight invariant
-		// check above should prevent this in practice; treat as benign.
-		log.Debug("transfers").
-			Int64("id", id).Err(err).
-			Msg("RequeueFailedTransfer no-op, state changed under us")
-		return
-	}
-
 	p.manager.workerWg.Add(1)
 	go func() {
 		defer p.manager.workerWg.Done()
 		files, err := p.manager.client.GetAllTransferFiles(p.manager.Context(), putioTransfer.FileID)
 		if err != nil {
-			log.Error("transfers").Int64("id", id).Err(err).Msg("Retry: GetAllTransferFiles failed")
-			// Drop back to Failed; the next monitor tick will re-evaluate
-			// per backoff.
-			_ = p.manager.coordinator.FailTransfer(id, err)
+			log.Error("transfers").Int64("id", id).Err(err).
+				Msg("Retry: GetAllTransferFiles failed; leaving transfer in Failed for next tick")
+			// State is still Failed and the in-flight invariant still holds
+			// (we haven't touched the counters), so the next monitor tick
+			// will re-evaluate per backoff.
 			return
 		}
 		if len(files) == 0 {
 			_ = p.manager.coordinator.FailTransfer(id, NewNoFilesFoundError(id))
+			return
+		}
+		if err := p.manager.coordinator.RequeueFailedTransfer(id); err != nil {
+			// Race: state moved from Failed under us. The in-flight invariant
+			// check in tryRetryFailedTransfer should prevent this in practice;
+			// treat as benign.
+			log.Debug("transfers").
+				Int64("id", id).Err(err).
+				Msg("RequeueFailedTransfer no-op, state changed under us")
 			return
 		}
 		queued := p.queueTransferFiles(putioTransfer, files)

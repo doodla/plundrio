@@ -455,3 +455,61 @@ func TestProcessFailedTransfersRetryTransferAPIError(t *testing.T) {
 		t.Errorf("Permanent = true, want false (not yet — we'll wait the window)")
 	}
 }
+
+// TestProcessFailedTransfersStaysFailedOnGetFilesError exercises the
+// dispatchRequeue ordering rule: if GetAllTransferFiles errors, the transfer
+// must remain in Failed with completed+failed == total so the in-flight
+// invariant still holds and the next backoff tick can retry. Flipping state
+// before the API call would have left the transfer stuck (failedFiles still
+// 0, invariant fails, every future tick defers).
+func TestProcessFailedTransfersStaysFailedOnGetFilesError(t *testing.T) {
+	var callCount int
+	client := &fakePutioClient{
+		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, errors.New("put.io 503")
+			}
+			return []*putio.File{makePutioFile(1, 100)}, nil
+		},
+	}
+	m := newTestManagerWithClient(client)
+
+	driveTransferToFailed(t, m, 1, 1)
+	setPutioTransfers(m.processor, &putio.Transfer{ID: 1, FileID: 999, Status: "COMPLETED"})
+
+	base := time.Now()
+	// First tick: Count == 0 path, so no backoff gate.
+	m.processor.processFailedTransfersAt(base)
+	m.workerWg.Wait()
+
+	ctx, _ := m.coordinator.GetTransferContext(1)
+	if ctx.GetState() != TransferLifecycleFailed {
+		t.Errorf("state after API error = %s, want Failed", ctx.GetState())
+	}
+	completed, failed, total := ctx.GetCounters()
+	if completed != 0 || failed != 1 || total != 1 {
+		t.Errorf("counters after API error = (%d, %d, %d), want (0, 1, 1) — invariant must still hold",
+			completed, failed, total)
+	}
+	rs := getRetryStateForTest(t, m.processor, 1)
+	if rs.Count != 1 {
+		t.Errorf("Count = %d, want 1 (must have been bumped on monitor goroutine)", rs.Count)
+	}
+
+	// Second tick after the 5-minute backoff: the cascade must be able to
+	// retry. This proves the transfer wasn't stuck.
+	m.processor.processFailedTransfersAt(base.Add(6 * time.Minute))
+	m.workerWg.Wait()
+
+	if callCount != 2 {
+		t.Errorf("GetAllTransferFiles call count = %d, want 2 (second tick should have retried)", callCount)
+	}
+	rs = getRetryStateForTest(t, m.processor, 1)
+	if rs.Count != 2 {
+		t.Errorf("Count after second tick = %d, want 2", rs.Count)
+	}
+	if ctx.GetState() != TransferLifecycleDownloading {
+		t.Errorf("state after second tick = %s, want Downloading", ctx.GetState())
+	}
+}
