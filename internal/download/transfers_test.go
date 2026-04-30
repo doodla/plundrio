@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -337,13 +338,18 @@ func TestProcessFailedTransfersPostFallbackPermanentOnSecondFailure(t *testing.T
 }
 
 func TestProcessFailedTransfersPermanentSkipped(t *testing.T) {
+	// Track API calls via atomic counters rather than t.Errorf inside the
+	// fake — getAllTransferFilesFn runs from dispatchRequeue's goroutine,
+	// and t.Errorf isn't safe from non-test goroutines (race detector
+	// flags it). Assert after workerWg.Wait().
+	var getFilesCalls, retryCalls atomic.Int32
 	client := &fakePutioClient{
 		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			t.Errorf("GetAllTransferFiles must not be called for Permanent transfers")
+			getFilesCalls.Add(1)
 			return nil, nil
 		},
 		retryTransferFn: func(transferID int64) (*putio.Transfer, error) {
-			t.Errorf("RetryTransfer must not be called for Permanent transfers")
+			retryCalls.Add(1)
 			return nil, nil
 		},
 	}
@@ -358,6 +364,13 @@ func TestProcessFailedTransfersPermanentSkipped(t *testing.T) {
 
 	m.processor.processFailedTransfersAt(time.Now())
 	m.workerWg.Wait()
+
+	if got := getFilesCalls.Load(); got != 0 {
+		t.Errorf("GetAllTransferFiles called %d times; want 0 for Permanent transfer", got)
+	}
+	if got := retryCalls.Load(); got != 0 {
+		t.Errorf("RetryTransfer called %d times; want 0 for Permanent transfer", got)
+	}
 }
 
 func TestProcessFailedTransfersHandlesDeletedPutioTransfer(t *testing.T) {
@@ -382,13 +395,21 @@ func TestProcessFailedTransfersHandlesDeletedPutioTransfer(t *testing.T) {
 }
 
 func TestProcessFailedTransfersIgnoresNonFailedStates(t *testing.T) {
+	// See TestProcessFailedTransfersPermanentSkipped for why we count
+	// instead of t.Errorf'ing inside the fake.
+	var getFilesCalls atomic.Int32
 	client := &fakePutioClient{
 		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			t.Errorf("GetAllTransferFiles must not be called for non-Failed states")
+			getFilesCalls.Add(1)
 			return nil, nil
 		},
 	}
 	m := newTestManagerWithClient(client)
+	defer func() {
+		if got := getFilesCalls.Load(); got != 0 {
+			t.Errorf("GetAllTransferFiles called %d times; want 0 for non-Failed transfers", got)
+		}
+	}()
 
 	// Initial
 	m.coordinator.InitiateTransfer(1, "initial", 100, 1)
