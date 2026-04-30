@@ -700,7 +700,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 			Msg("put.io fallback succeeded, requeueing locally one final time")
 		rs.PutioFallbackRetried = true
 		rs.LastAttempt = now
-		p.dispatchRequeue(id, ctx, putioTransfer)
+		p.dispatchRequeue(id, putioTransfer)
 		return
 	}
 
@@ -733,7 +733,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 		}
 		rs.PutioFallback = true
 		rs.PutioFallbackAt = now
-		// Count is preserved here; Branch A reads it to gate post-fallback transitions.
+		// Count carries forward across the put.io fallback for log continuity; no branch reads it after fallback fires.
 		return
 	}
 
@@ -744,7 +744,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 		Int64("id", id).Str("name", ctx.Name).
 		Int("local_retry_attempt", rs.Count).Int("max", maxLocalRetryAttempts).
 		Msg("Re-queueing failed transfer for local retry")
-	p.dispatchRequeue(id, ctx, putioTransfer)
+	p.dispatchRequeue(id, putioTransfer)
 }
 
 // dispatchRequeue runs the file-fetch + coordinator state flip + queue work in
@@ -762,7 +762,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 // Note: rs.Count and rs.LastAttempt are mutated by the caller on the monitor
 // goroutine *before* this function is invoked, so backoff is respected even
 // if GetAllTransferFiles is slow.
-func (p *TransferProcessor) dispatchRequeue(id int64, ctx *TransferContext, putioTransfer *putio.Transfer) {
+func (p *TransferProcessor) dispatchRequeue(id int64, putioTransfer *putio.Transfer) {
 	p.manager.workerWg.Add(1)
 	go func() {
 		defer p.manager.workerWg.Done()

@@ -314,7 +314,7 @@ func (tc *TransferCoordinator) RequeueFailedTransfer(transferID int64) error {
 		Int64("id", transferID).
 		Str("name", ctx.Name).
 		Int32("total", ctx.TotalFiles).
-		Msg("Requeued failed transfer for local retry; counters zeroed for re-establishment from disk")
+		Msg("Requeued failed transfer for local retry")
 
 	return nil
 }
