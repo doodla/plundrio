@@ -270,14 +270,22 @@ func (tc *TransferCoordinator) CompleteTransfer(transferID int64) error {
 // processFailedTransfers when a transient failure (CDN reset, network blip)
 // left the transfer stuck in Failed despite put.io having the data.
 //
-// Preserves completedFiles and downloadedSize so already-on-disk files are
-// skipped via shouldDownloadFile's size check on the requeued attempt.
+// Zeros all per-file counters (completedFiles, failedFiles, downloadedSize).
+// queueTransferFiles then re-establishes them from disk: files already
+// present at the right size short-circuit through shouldDownloadFile and call
+// FileCompleted, rebuilding the count without redundant downloads. Files not
+// on disk get queued for workers as usual.
+//
+// Why zeroing matters: if completedFiles were preserved, queueTransferFiles
+// would call FileCompleted for on-disk files on top of the preserved count,
+// double-counting. When even one of the truly retried files completed,
+// completedFiles >= TotalFiles && failedFiles == 0 would trigger the
+// Completed transition and the cleanup hook would delete the put.io file
+// while still-running workers held stale URLs.
 //
 // Refuses the transition if any worker for the previous attempt has not yet
-// reported (completed+failed < TotalFiles): zeroing failedFiles while a late
-// FileCompleted is in flight would push completedFiles >= TotalFiles with
-// failedFiles==0, falsely triggering the Completed transition and the
-// cleanup hook (which deletes the put.io file) under the requeued workers.
+// reported (completed+failed < TotalFiles): zeroing counters while a late
+// FileCompleted is in flight would briefly observe an under-counted state.
 func (tc *TransferCoordinator) RequeueFailedTransfer(transferID int64) error {
 	ctx, ok := tc.GetTransferContext(transferID)
 	if !ok {
@@ -297,15 +305,16 @@ func (tc *TransferCoordinator) RequeueFailedTransfer(transferID int64) error {
 	}
 
 	ctx.state = TransferLifecycleDownloading
+	ctx.completedFiles = 0
 	ctx.failedFiles = 0
+	ctx.downloadedSize = 0
 	ctx.err = nil
 
 	log.Info("transfer").
 		Int64("id", transferID).
 		Str("name", ctx.Name).
-		Int32("completed", ctx.completedFiles).
 		Int32("total", ctx.TotalFiles).
-		Msg("Requeued failed transfer for local retry")
+		Msg("Requeued failed transfer for local retry; counters zeroed for re-establishment from disk")
 
 	return nil
 }

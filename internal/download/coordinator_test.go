@@ -389,11 +389,15 @@ func TestCoordinatorRequeueFailedTransfer(t *testing.T) {
 		t.Errorf("state = %s, want Downloading", ctx.GetState())
 	}
 	completed, failed, _ := ctx.GetCounters()
-	if completed != 1 {
-		t.Errorf("completed = %d, want 1 (preserved across requeue)", completed)
+	if completed != 0 {
+		t.Errorf("completed = %d, want 0 (zeroed on requeue; queueTransferFiles re-establishes from disk)", completed)
 	}
 	if failed != 0 {
 		t.Errorf("failed = %d, want 0 (zeroed on requeue)", failed)
+	}
+	downloadedSize, _, _, _ := ctx.GetProgress()
+	if downloadedSize != 0 {
+		t.Errorf("downloadedSize = %d, want 0 (zeroed on requeue)", downloadedSize)
 	}
 	if ctx.GetError() != nil {
 		t.Errorf("err = %v, want nil after requeue", ctx.GetError())
@@ -487,7 +491,10 @@ func TestCoordinatorRequeueAfterMixedFailure(t *testing.T) {
 	m := newTestManager()
 	tc := m.coordinator
 
-	// 3 files: 1 succeeds, 2 fail. Confirm requeue zeros failed and preserves completed=1.
+	// 3 files: 1 succeeds, 2 fail. Confirm requeue zeros all per-file counters
+	// (queueTransferFiles will re-establish them from disk on the requeued
+	// attempt — preserving completedFiles here would double-count it when
+	// queueTransferFiles calls FileCompleted for on-disk files).
 	tc.InitiateTransfer(1, "test", 100, 3)
 	if err := tc.StartDownload(1); err != nil {
 		t.Fatalf("StartDownload: %v", err)
@@ -508,8 +515,13 @@ func TestCoordinatorRequeueAfterMixedFailure(t *testing.T) {
 
 	ctx, _ := tc.GetTransferContext(1)
 	completed, failed, total := ctx.GetCounters()
-	if completed != 1 || failed != 0 || total != 3 {
-		t.Errorf("counters = (%d, %d, %d), want (1, 0, 3)", completed, failed, total)
+	if completed != 0 || failed != 0 || total != 3 {
+		t.Errorf("counters = (%d, %d, %d), want (0, 0, 3) — all zeroed on requeue",
+			completed, failed, total)
+	}
+	downloadedSize, _, _, _ := ctx.GetProgress()
+	if downloadedSize != 0 {
+		t.Errorf("downloadedSize = %d, want 0 (zeroed on requeue)", downloadedSize)
 	}
 }
 

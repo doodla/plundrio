@@ -114,6 +114,14 @@ func newTestManagerWithClient(client PutioClient) *Manager {
 	return New(cfg, client)
 }
 
+// newTestManagerWithClientAndTargetDir is like newTestManagerWithClient but
+// uses the given target dir, for tests that need real on-disk files (e.g.
+// the queueTransferFiles on-disk-file path in shouldDownloadFile).
+func newTestManagerWithClientAndTargetDir(client PutioClient, targetDir string) *Manager {
+	cfg := &config.Config{TargetDir: targetDir, WorkerCount: 1}
+	return New(cfg, client)
+}
+
 // driveTransferToCleanup runs the coordinator state machine through to the
 // point where cleanup hooks fire: Initiate → StartDownload → FileCompleted →
 // CompleteTransfer. The fileCount of 1 keeps the test focused on cleanup,

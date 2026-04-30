@@ -2,6 +2,8 @@ package download
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -453,6 +455,107 @@ func TestProcessFailedTransfersRetryTransferAPIError(t *testing.T) {
 	}
 	if rs.Permanent {
 		t.Errorf("Permanent = true, want false (not yet — we'll wait the window)")
+	}
+}
+
+// TestProcessFailedTransfersDoesNotTriggerCleanupForOnDiskFiles is a
+// regression for the cleanup-race bug. Setup: a 3-file transfer where file A
+// completed on the prior attempt (and is still on disk), B and C failed.
+// Pre-fix RequeueFailedTransfer preserved completedFiles=1; queueTransferFiles
+// then re-detected A on disk and called FileCompleted again, double-counting
+// to 2. When B's new worker eventually completed (3 == total, failed == 0),
+// the Completed transition fired and the cleanup hook deleted the put.io
+// file out from under C's still-running worker.
+//
+// After the fix, RequeueFailedTransfer zeros all per-file counters and
+// queueTransferFiles re-establishes them from disk. A is counted once, B and
+// C are queued, no cleanup hook fires until B and C actually complete.
+func TestProcessFailedTransfersDoesNotTriggerCleanupForOnDiskFiles(t *testing.T) {
+	targetDir := t.TempDir()
+	transferName := "test-transfer"
+	fileAName := "file-a.bin"
+	fileASize := int64(123)
+
+	// Plant file A on disk at the path queueTransferFiles will check.
+	transferDir := filepath.Join(targetDir, transferName)
+	if err := os.MkdirAll(transferDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(transferDir, fileAName), make([]byte, fileASize), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	files := []*putio.File{
+		{ID: 101, Name: fileAName, Size: fileASize},
+		{ID: 102, Name: "file-b.bin", Size: 200},
+		{ID: 103, Name: "file-c.bin", Size: 300},
+	}
+	client := &fakePutioClient{
+		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+			return files, nil
+		},
+	}
+	m := newTestManagerWithClientAndTargetDir(client, targetDir)
+
+	// Drive the transfer to Failed with completed=1 (A succeeded), failed=2
+	// (B and C). This is the state pre-requeue would have left behind.
+	m.coordinator.InitiateTransfer(1, transferName, 999, 3)
+	if err := m.coordinator.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	if err := m.coordinator.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := m.coordinator.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+	if err := m.coordinator.FileFailure(1); err != nil {
+		t.Fatalf("FileFailure: %v", err)
+	}
+
+	ctx, _ := m.coordinator.GetTransferContext(1)
+	if ctx.GetState() != TransferLifecycleFailed {
+		t.Fatalf("precondition: state = %s, want Failed", ctx.GetState())
+	}
+
+	setPutioTransfers(m.processor, &putio.Transfer{
+		ID:     1,
+		Name:   transferName,
+		FileID: 999,
+		Status: "COMPLETED",
+	})
+
+	m.processor.processFailedTransfersAt(time.Now())
+	m.workerWg.Wait()
+
+	// After requeue + queueTransferFiles: A is counted once, B and C are
+	// queued (no worker running, so they sit in m.jobs).
+	completed, failed, total := ctx.GetCounters()
+	if completed != 1 || failed != 0 || total != 3 {
+		t.Errorf("counters = (%d, %d, %d), want (1, 0, 3) — A on disk counted exactly once",
+			completed, failed, total)
+	}
+
+	// State must NOT have advanced past Downloading (no completion check
+	// can have fired).
+	if state := ctx.GetState(); state != TransferLifecycleDownloading {
+		t.Errorf("state = %s, want Downloading (cleanup must not have fired)", state)
+	}
+
+	// The cleanup hook deletes the put.io source file. If it fired, the
+	// fake client would have recorded a DeleteFile call.
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.deleteFileCalls) != 0 {
+		t.Errorf("cleanup hook fired prematurely: DeleteFile calls = %v", client.deleteFileCalls)
+	}
+	if len(client.deleteTransferCalls) != 0 {
+		t.Errorf("cleanup hook fired prematurely: DeleteTransfer calls = %v", client.deleteTransferCalls)
+	}
+
+	// B and C should be in the queue (FileID 102 and 103).
+	if got := len(m.jobs); got != 2 {
+		t.Errorf("queued jobs = %d, want 2 (B and C)", got)
 	}
 }
 
