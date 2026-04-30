@@ -131,6 +131,15 @@ func (tc *TransferContext) GetLocalProgress() (speed float64, eta time.Time) {
 	return
 }
 
+// GetCounters returns a snapshot of file-progress counters under the context's
+// lock. Used by processFailedTransfers for in-flight invariant checking
+// without exposing internal fields.
+func (tc *TransferContext) GetCounters() (completed, failed, total int32) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+	return tc.completedFiles, tc.failedFiles, tc.TotalFiles
+}
+
 // GetState returns the current lifecycle state.
 func (tc *TransferContext) GetState() TransferLifecycleState {
 	tc.mu.RLock()
