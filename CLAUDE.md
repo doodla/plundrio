@@ -32,6 +32,10 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 **Important**: When Go dependencies change (`go.mod`/`go.sum`), the `vendorHash` in `flake.nix` (line 169) must be updated. Build the project with Nix; the error message will contain the correct hash.
 
+## Fork-only
+
+All work — branches, commits, PRs, issues, releases — happens on `doodla/plundrio`. We do not contribute back to `elsbrock/plundrio`. The `upstream` remote exists for rebasing only. When filing issues or opening PRs with `gh`, always pass `--repo doodla/plundrio` (the gotcha below explains why).
+
 ## Releasing
 
 This repo is a fork of `elsbrock/plundrio` deployed from `ghcr.io/doodla/plundrio:<tag>`. The release process is governed by [homelab ADR 0017](https://github.com/doodla/homelab/blob/main/docs/decisions/0017-plundrio-fork.md).
