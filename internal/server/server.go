@@ -9,9 +9,9 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/elsbrock/go-putio"
-	"github.com/elsbrock/plundrio/internal/config"
-	"github.com/elsbrock/plundrio/internal/download"
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/download"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // PutioClient abstracts the put.io API methods used by the RPC server.

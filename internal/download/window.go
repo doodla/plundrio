@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elsbrock/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/config"
 )
 
 // ValidateStartWindow checks whether the configured download-start window is valid.

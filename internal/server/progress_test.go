@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/elsbrock/plundrio/internal/download"
+	"github.com/doodla/plundrio/internal/download"
 )
 
 // newTestTransferCtx creates a TransferContext for testing with the given parameters.

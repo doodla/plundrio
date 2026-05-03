@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 const stateFileName = ".plundrio-state.json"

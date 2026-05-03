@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elsbrock/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/config"
 )
 
 func TestValidateStartWindow(t *testing.T) {

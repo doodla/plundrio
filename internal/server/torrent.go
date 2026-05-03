@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/elsbrock/go-putio"
-	"github.com/elsbrock/plundrio/internal/download"
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/download"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // extractCategory returns the relative category path from downloadDir.

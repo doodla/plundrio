@@ -5,7 +5,7 @@ import (
 	"time"
 
 	grab "github.com/cavaliergopher/grab/v3"
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // monitorGrabDownloadProgress starts a goroutine to monitor and log download progress from grab

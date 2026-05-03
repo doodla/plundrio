@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/elsbrock/plundrio/internal/api"
-	"github.com/elsbrock/plundrio/internal/config"
-	"github.com/elsbrock/plundrio/internal/download"
-	"github.com/elsbrock/plundrio/internal/log"
-	"github.com/elsbrock/plundrio/internal/server"
+	"github.com/doodla/plundrio/internal/api"
+	"github.com/doodla/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/download"
+	"github.com/doodla/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/server"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -57,7 +57,9 @@ var runCmd = &cobra.Command{
 		}
 
 		// Bind flags to Viper
-		viper.BindPFlags(cmd.Flags())
+		if err := viper.BindPFlags(cmd.Flags()); err != nil {
+			log.Fatal("config").Err(err).Msg("Failed to bind command flags")
+		}
 
 		// Set log level from env/config/flag (in that order)
 		logLevel := viper.GetString("log-level")
@@ -105,7 +107,7 @@ var runCmd = &cobra.Command{
 
 		if targetDir == "" || putioFolder == "" || oauthToken == "" {
 			log.Error("config").Msg("Not all required configuration values were provided")
-			cmd.Usage()
+			_ = cmd.Usage()
 			os.Exit(1)
 		}
 
@@ -216,7 +218,7 @@ download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
   end: "05:00"
-log_level: "info"					  # Log level (trace,debug,info,warn,error,fatal,panic,none,pretty)
+log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
@@ -259,7 +261,7 @@ var getTokenCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal("auth").Err(err).Msg("Failed to get OOB code")
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		var codeResponse struct {
 			Code      string `json:"code"`
@@ -294,10 +296,10 @@ var getTokenCmd = &cobra.Command{
 					Status     string `json:"status"`
 				}
 				if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
-					tokenResp.Body.Close()
+					_ = tokenResp.Body.Close()
 					continue
 				}
-				tokenResp.Body.Close()
+				_ = tokenResp.Body.Close()
 
 				if tokenResult.Status == "OK" && tokenResult.OAuthToken != "" {
 					log.Info("auth").
@@ -322,7 +324,7 @@ func init() {
 	runCmd.Flags().StringP("token", "k", "", "Put.io OAuth token (required)")
 	runCmd.Flags().StringP("listen", "l", ":9091", "Listen address")
 	runCmd.Flags().IntP("workers", "w", 4, "Number of workers")
-	runCmd.Flags().String("log-level", "", "Log level (trace,debug,info,warn,error,fatal,none,pretty)")
+	runCmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(getTokenCmd)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // checkDiskQuota checks disk usage and handles quota warnings
