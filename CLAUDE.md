@@ -36,6 +36,28 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 All work — branches, commits, PRs, issues, releases — happens on `doodla/plundrio`. We do not contribute back to `elsbrock/plundrio`. The `upstream` remote exists for rebasing only. When filing issues or opening PRs with `gh`, always pass `--repo doodla/plundrio` (the gotcha below explains why).
 
+## Issue labels
+
+The label scheme is shaped for Claude-as-maintainer (no human team coordination), so it omits things humans expect (priority labels, size estimates) and adds things only a cold-starting agent needs (decision-state, context-blocked).
+
+**Area** — `area:download`, `area:server`, `area:api`, `area:config`, `area:ci`, `area:nixos`. Multi-select. Used to load relevant context, not to route work. Apply one or more to every issue.
+
+**Workflow state** — sparse, high-signal:
+
+- `urgent` — drop everything. Pair with GitHub's pin feature (max 3 pinned). Filed in priority order, so issue numbers also encode rough priority — `urgent` is just for the top of the heap.
+- `needs:decision` — the body lists real options and the operator must pick before Claude implements. Don't apply when the body recommends an option and the alternatives are minor; only when the choice is genuinely open.
+- `needs:context` — Claude started, hit a question, parked the work. Waiting on operator response. Removed when work resumes.
+
+**Type** — keep GitHub defaults (`bug`, `enhancement`, `documentation`) plus `security` for issues with security implications (different urgency than a generic bug).
+
+**Don't add:**
+
+- `P0`/`P1`/`P2`/`P3` — issue numbers + `urgent` + pinning cover priority. A parallel scheme rots.
+- `size:*` — scope is in the issue body. Effort is unknowable until the work starts.
+- `status:*` — open/closed + assignee + the workflow labels above are enough.
+
+When filing a new issue: at least one `area:*` and a type. Add `urgent` only if it's actually urgent. Add `needs:decision` only if the operator must choose between real options before any code can be written.
+
 ## Releasing
 
 This repo is a fork of `elsbrock/plundrio` deployed from `ghcr.io/doodla/plundrio:<tag>`. The release process is governed by [homelab ADR 0017](https://github.com/doodla/homelab/blob/main/docs/decisions/0017-plundrio-fork.md).
