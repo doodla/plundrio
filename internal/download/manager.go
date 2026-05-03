@@ -232,16 +232,15 @@ func (m *Manager) Stop() {
 	m.stopOnce.Do(func() {
 		// Cancel context first so in-flight API calls abort
 		m.cancel()
-		// Signal workers to stop via stopChan
+		// Signal workers and queueing path to stop via stopChan. The jobs
+		// channel is intentionally NOT closed: QueueDownload does
+		// `select { case m.jobs <- job: ... case <-m.stopChan: ... }`
+		// holding m.mu, so closing m.jobs would race with that send and
+		// can panic with "send on closed channel" (issue #2). Workers
+		// already exit on stopChan; pending buffered jobs are abandoned,
+		// which is the right behavior on shutdown — activeFiles cleanup
+		// is idempotent across restart.
 		close(m.stopChan)
-		// Close jobs channel to prevent new submissions
-		close(m.jobs)
-		// Drain any remaining jobs to prevent deadlock
-		go func() {
-			for range m.jobs {
-				// Drain jobs channel
-			}
-		}()
 	})
 
 	// Wait for all workers to finish
