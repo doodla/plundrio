@@ -17,7 +17,16 @@ import (
 
 // extractCategory returns the relative category path from downloadDir.
 // For example, if targetDir="/downloads" and downloadDir="/downloads/tv",
-// it returns "tv". Returns "" if downloadDir is empty or equals targetDir.
+// it returns "tv". Returns "" if downloadDir is empty, equals targetDir,
+// or escapes targetDir.
+//
+// Escape behavior matters for security: the returned category is joined
+// into the local write path in TransferProcessor.shouldDownloadFile and
+// queueFileDownload via filepath.Join, which normalizes "../" segments.
+// If we returned "../etc" here, files would land outside targetDir. Fail
+// closed by returning "" — that's the same as the documented "no
+// downloadDir" behavior, so files just go to the flat targetDir instead
+// of writing to an unintended location.
 func extractCategory(targetDir, downloadDir string) string {
 	if downloadDir == "" {
 		return ""
@@ -26,8 +35,19 @@ func extractCategory(targetDir, downloadDir string) string {
 	if err != nil || rel == "." {
 		return ""
 	}
-	// Clean up any trailing slashes or path oddities
-	return filepath.Clean(rel)
+	rel = filepath.Clean(rel)
+	// Reject any path that escapes targetDir. After Clean, an escaping
+	// path always starts with ".." (either bare ".." or "../..."). Pure
+	// "." was already returned above.
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		log.Warn("server").
+			Str("target_dir", targetDir).
+			Str("download_dir", downloadDir).
+			Str("rejected_rel", rel).
+			Msg("downloadDir escapes targetDir; ignoring category and writing to targetDir")
+		return ""
+	}
+	return rel
 }
 
 // findTransferByHash finds a transfer by its hash string
