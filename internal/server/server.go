@@ -6,8 +6,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "net/http/pprof"
-
 	"github.com/elsbrock/go-putio"
 	"github.com/doodla/plundrio/internal/config"
 	"github.com/doodla/plundrio/internal/download"
