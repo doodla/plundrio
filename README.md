@@ -274,6 +274,8 @@ Configuration values are loaded in the following order, with later sources overr
 
 💡 **Security Note**: Store OAuth tokens in environment variables rather than config files or command-line arguments for better security.
 
+For systemd-managed deployments (including the bundled NixOS module), set `PLDR_TOKEN_FILE=/path/to/token` instead of `PLDR_TOKEN`. plundrio reads the file at startup and trims trailing whitespace, which lets the token live in `LoadCredential` rather than the unit's `Environment=`. If both `PLDR_TOKEN` and `PLDR_TOKEN_FILE` are set, the explicit token wins.
+
 ## 🔌 Configuring *arr Applications
 
 To add plundrio to your *arr application (Sonarr, Radarr, etc.):

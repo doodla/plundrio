@@ -64,7 +64,10 @@ var runCmd = &cobra.Command{
 		// Get configuration values from viper (which checks env vars, config file, and flags)
 		targetDir := viper.GetString("target")
 		putioFolder := strings.ToLower(viper.GetString("folder"))
-		oauthToken := viper.GetString("token")
+		oauthToken, err := resolveOAuthToken(viper.GetString("token"), os.Getenv("PLDR_TOKEN_FILE"))
+		if err != nil {
+			log.Fatal("config").Err(err).Msg("Failed to read PLDR_TOKEN_FILE")
+		}
 		listenAddr := viper.GetString("listen")
 		workerCount := viper.GetInt("workers")
 		downloadStartWindow := config.DownloadStartWindowConfig{
