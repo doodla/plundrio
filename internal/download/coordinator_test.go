@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/elsbrock/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/config"
 )
 
 // newTestManager creates a minimal Manager with just enough fields

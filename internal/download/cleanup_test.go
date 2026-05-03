@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/elsbrock/go-putio"
-	"github.com/elsbrock/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/config"
 )
 
 // fakePutioClient records calls and returns canned errors. Each method

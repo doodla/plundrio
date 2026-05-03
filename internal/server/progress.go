@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"github.com/elsbrock/plundrio/internal/download"
+	"github.com/doodla/plundrio/internal/download"
 )
 
 // Transmission status constants

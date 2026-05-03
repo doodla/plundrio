@@ -10,7 +10,7 @@ download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
   end: "05:00"
-log_level: "info"					  # Log level (trace,debug,info,warn,error,fatal,panic,none,pretty)
+log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,

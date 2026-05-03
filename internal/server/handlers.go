@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // handleRPC processes transmission-rpc requests

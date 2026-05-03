@@ -1,4 +1,4 @@
-module github.com/elsbrock/plundrio
+module github.com/doodla/plundrio
 
 go 1.25.0
 

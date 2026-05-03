@@ -11,7 +11,7 @@ import (
 	"time"
 
 	grab "github.com/cavaliergopher/grab/v3"
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // downloadWorker processes download jobs from the queue

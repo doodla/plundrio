@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/elsbrock/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/log"
 )
 
 // TransferCoordinator manages the lifecycle of transfers and their associated downloads
