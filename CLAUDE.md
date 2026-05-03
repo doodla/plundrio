@@ -28,7 +28,13 @@ nix develop
 go build ./cmd/plundrio && ./plundrio run --help
 ```
 
-**CI** (`.github/workflows/build.yml`) runs `nix build` for all four targets (native, aarch64, docker, docker-aarch64) on every push/PR.
+**CI** (`.github/workflows/build.yml`) runs three jobs on every push/PR:
+
+- `go` — `go build` and `go test -race` against the version in `go.mod`.
+- `lint` — `golangci-lint` (default linters; no `.golangci.yml` yet).
+- `nix` — `nix build .#plundrio` (native only — full multi-arch matrix runs at release time via `release.yml`, which fires `on: release: published`).
+
+`release.yml` builds all four targets (native, aarch64, docker, docker-aarch64) at release publish.
 
 **Important**: When Go dependencies change (`go.mod`/`go.sum`), the `vendorHash` in `flake.nix` (line 169) must be updated. Build the project with Nix; the error message will contain the correct hash.
 
