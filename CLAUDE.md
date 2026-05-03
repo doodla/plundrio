@@ -32,6 +32,30 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 **Important**: When Go dependencies change (`go.mod`/`go.sum`), the `vendorHash` in `flake.nix` (line 169) must be updated. Build the project with Nix; the error message will contain the correct hash.
 
+## Releasing
+
+This repo is a fork of `elsbrock/plundrio` deployed from `ghcr.io/doodla/plundrio:<tag>`. The release process is governed by [homelab ADR 0017](https://github.com/doodla/homelab/blob/main/docs/decisions/0017-plundrio-fork.md).
+
+**Tag scheme.** Track upstream's version when rebased clean; bump to a **higher** version than upstream when the fork carries forward-only patches. **No suffix** (`-doodla.N` etc.) — the `ghcr.io/doodla/…` namespace communicates fork status, and a suffix fragments the tag space and forces homelab's compose pin into a non-standard form. If upstream later releases the version we already used, leapfrog further. Diverging from upstream's number line is expected.
+
+**Procedure:**
+
+1. Update `version` in `flake.nix` (line 14) to the next version (no `v` prefix). Commit `chore: bump version to X.Y.Z`.
+2. `git tag vX.Y.Z` and `git push origin main && git push origin vX.Y.Z`.
+3. **Create the GitHub release** explicitly: `gh release create vX.Y.Z --repo doodla/plundrio --notes "..."`. Pushing the tag is not enough — `release.yml` only runs `on: release: published`, so without the explicit release the image build never fires.
+4. Watch the workflow: `gh run watch <run-id> --repo doodla/plundrio --exit-status`. ~7–10 min based on prior runs.
+5. Image lands as a multi-arch manifest at `ghcr.io/doodla/plundrio:vX.Y.Z` (amd64 + arm64).
+
+**Default `gh` repo gotcha.** This clone has both `origin` (the fork) and `upstream` (elsbrock) remotes. `gh release create` without `--repo doodla/plundrio` defaults to upstream and errors with `tag … has not been pushed to elsbrock/plundrio`. Always pass `--repo doodla/plundrio` for fork-side releases.
+
+**Correcting a bad release.** If a wrong tag was pushed:
+
+1. `gh release delete vBAD --repo doodla/plundrio --yes`
+2. `git tag -d vBAD && git push origin :refs/tags/vBAD`
+3. Bump `flake.nix` again, new commit (do **not** force-push main — leave the bump-and-correct sequence in history; the linear log is more honest than a rewritten one), retag, redo the release.
+
+The GHCR image at the bad tag stays in the registry but is harmless if no one references it. Delete optionally via `gh api -X DELETE /user/packages/container/plundrio/versions/<id>`.
+
 ## Architecture
 
 ```
@@ -76,7 +100,7 @@ Environment prefix: `PLDR_` (e.g., `PLDR_TOKEN`, `PLDR_TARGET`, `PLDR_FOLDER`). 
 
 ## Testing
 
-There are currently no tests in this codebase.
+Unit tests live alongside their packages (e.g. `internal/download/coordinator_test.go`, `transfers_test.go`, `cleanup_test.go`). No integration tests against live put.io. Style: standard `testing.T`, no testify or other assertion libs — match the existing files. The `fakePutioClient` in `cleanup_test.go` is the shared in-memory fake; extend it rather than introducing a parallel one.
 
 ## Known Issues
 
