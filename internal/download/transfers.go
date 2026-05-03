@@ -6,21 +6,38 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elsbrock/go-putio"
 	"github.com/elsbrock/plundrio/internal/log"
 )
 
-// TransferProcessor handles the processing of Put.io transfers
+// TransferProcessor handles the processing of Put.io transfers.
+//
+// The transfers field is a pointer to an immutable map. checkTransfers builds
+// a fresh map each tick and atomic-swaps it; readers (GetTransfers,
+// findPutioTransferByID, the process* methods) Load() the pointer and treat
+// the result as read-only. Replacing the whole map rather than mutating an
+// existing one means readers never see a partial state and need no locks.
 type TransferProcessor struct {
 	manager            *Manager
-	transfers          map[string][]*putio.Transfer // Status -> Transfers
-	processedTransfers sync.Map                     // map[int64]bool - Tracks transfers that have been processed locally
-	retryAttempts      sync.Map                     // map[int64]int - Tracks retry attempts for put.io ERROR transfers (processErroredTransfers)
-	failedRetryStates  sync.Map                     // map[int64]*localRetryState - Tracks local retry attempts for TransferLifecycleFailed transfers (processFailedTransfers)
+	transfers          atomic.Pointer[map[string][]*putio.Transfer] // Status -> Transfers (immutable once published)
+	processedTransfers sync.Map                                     // map[int64]bool - Tracks transfers that have been processed locally
+	retryAttempts      sync.Map                                     // map[int64]int - Tracks retry attempts for put.io ERROR transfers (processErroredTransfers)
+	failedRetryStates  sync.Map                                     // map[int64]*localRetryState - Tracks local retry attempts for TransferLifecycleFailed transfers (processFailedTransfers)
 	folderID           int64
 	targetDir          string
+}
+
+// loadTransfers returns the most recently published transfer snapshot, or an
+// empty map if checkTransfers hasn't run yet. Callers must treat the returned
+// map as read-only.
+func (p *TransferProcessor) loadTransfers() map[string][]*putio.Transfer {
+	if m := p.transfers.Load(); m != nil {
+		return *m
+	}
+	return map[string][]*putio.Transfer{}
 }
 
 // localRetryState tracks a single failed transfer's progress through the
@@ -57,7 +74,7 @@ const putioFallbackWait = 30 * time.Minute
 // GetTransfers returns a copy of all transfers for a given folder ID
 func (p *TransferProcessor) GetTransfers() []*putio.Transfer {
 	var allTransfers []*putio.Transfer
-	for _, transfers := range p.transfers {
+	for _, transfers := range p.loadTransfers() {
 		for _, t := range transfers {
 			if t.SaveParentID == p.folderID {
 				allTransfers = append(allTransfers, t)
@@ -69,14 +86,16 @@ func (p *TransferProcessor) GetTransfers() []*putio.Transfer {
 
 // newTransferProcessor creates a new transfer processor
 func newTransferProcessor(m *Manager) *TransferProcessor {
-	return &TransferProcessor{
+	p := &TransferProcessor{
 		manager:            m,
-		transfers:          make(map[string][]*putio.Transfer),
 		processedTransfers: sync.Map{},
 		retryAttempts:      sync.Map{},
 		folderID:           m.cfg.FolderID,
 		targetDir:          m.cfg.TargetDir,
 	}
+	empty := map[string][]*putio.Transfer{}
+	p.transfers.Store(&empty)
+	return p
 }
 
 // monitorTransfers periodically checks for completed transfers
@@ -119,10 +138,10 @@ func (p *TransferProcessor) checkTransfers() {
 		Int("api_transfers_count", len(transfers)).
 		Msg("Retrieved transfers from API")
 
-	// Reset transfer status tracking
-	p.transfers = make(map[string][]*putio.Transfer)
-
-	// Categorize transfers by status
+	// Build a fresh snapshot, then atomic-swap. Readers (GetTransfers,
+	// findPutioTransferByID) see either the previous map or this one — never
+	// a partially-built state.
+	snapshot := make(map[string][]*putio.Transfer)
 	for _, t := range transfers {
 		if t.SaveParentID != p.folderID {
 			log.Debug("transfers").
@@ -132,8 +151,9 @@ func (p *TransferProcessor) checkTransfers() {
 				Msg("Skipping transfer from different folder")
 			continue
 		}
-		p.transfers[t.Status] = append(p.transfers[t.Status], t)
+		snapshot[t.Status] = append(snapshot[t.Status], t)
 	}
+	p.transfers.Store(&snapshot)
 
 	// Log transfer summary
 	p.logTransferSummary()
@@ -149,15 +169,16 @@ func (p *TransferProcessor) checkTransfers() {
 
 // logTransferSummary logs counts of transfers in each status and detailed information for all transfers
 func (p *TransferProcessor) logTransferSummary() {
+	transfers := p.loadTransfers()
 	counts := map[string]int{
-		"IN_QUEUE":    len(p.transfers["IN_QUEUE"]),
-		"WAITING":     len(p.transfers["WAITING"]),
-		"PREPARING":   len(p.transfers["PREPARING"]),
-		"DOWNLOADING": len(p.transfers["DOWNLOADING"]),
-		"COMPLETING":  len(p.transfers["COMPLETING"]),
-		"SEEDING":     len(p.transfers["SEEDING"]),
-		"COMPLETED":   len(p.transfers["COMPLETED"]),
-		"ERROR":       len(p.transfers["ERROR"]),
+		"IN_QUEUE":    len(transfers["IN_QUEUE"]),
+		"WAITING":     len(transfers["WAITING"]),
+		"PREPARING":   len(transfers["PREPARING"]),
+		"DOWNLOADING": len(transfers["DOWNLOADING"]),
+		"COMPLETING":  len(transfers["COMPLETING"]),
+		"SEEDING":     len(transfers["SEEDING"]),
+		"COMPLETED":   len(transfers["COMPLETED"]),
+		"ERROR":       len(transfers["ERROR"]),
 	}
 
 	log.Info("transfers").
@@ -286,7 +307,8 @@ func (p *TransferProcessor) logAllTransfersDetails() {
 
 // processReadyTransfers handles completed and seeding transfers
 func (p *TransferProcessor) processReadyTransfers() {
-	readyTransfers := append(p.transfers["COMPLETED"], p.transfers["SEEDING"]...)
+	transfers := p.loadTransfers()
+	readyTransfers := append(transfers["COMPLETED"], transfers["SEEDING"]...)
 	now := time.Now()
 
 	for _, transfer := range readyTransfers {
@@ -528,7 +550,7 @@ func (p *TransferProcessor) initializeTransfer(transfer *putio.Transfer, filesTo
 func (p *TransferProcessor) processErroredTransfers() {
 	const maxRetryAttempts = 3
 
-	for _, transfer := range p.transfers["ERROR"] {
+	for _, transfer := range p.loadTransfers()["ERROR"] {
 		// Get current retry count
 		retryCountValue, exists := p.retryAttempts.Load(transfer.ID)
 		retryCount := 0
@@ -799,7 +821,7 @@ func (p *TransferProcessor) dispatchRequeue(id int64, putioTransfer *putio.Trans
 // findPutioTransferByID searches the cached put.io transfer list (populated
 // by the most recent checkTransfers run) for a given ID.
 func (p *TransferProcessor) findPutioTransferByID(id int64) *putio.Transfer {
-	for _, byStatus := range p.transfers {
+	for _, byStatus := range p.loadTransfers() {
 		for _, t := range byStatus {
 			if t.ID == id {
 				return t

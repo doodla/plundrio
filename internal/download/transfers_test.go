@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,14 +51,15 @@ func getRetryStateForTest(t *testing.T, p *TransferProcessor, id int64) *localRe
 // findPutioTransferByID returns a known *putio.Transfer for the given ID.
 // Status "COMPLETED" by default; pass an explicit status when the test cares.
 func setPutioTransfers(p *TransferProcessor, transfers ...*putio.Transfer) {
-	p.transfers = make(map[string][]*putio.Transfer)
+	snapshot := make(map[string][]*putio.Transfer)
 	for _, t := range transfers {
 		status := t.Status
 		if status == "" {
 			status = "COMPLETED"
 		}
-		p.transfers[status] = append(p.transfers[status], t)
+		snapshot[status] = append(snapshot[status], t)
 	}
+	p.transfers.Store(&snapshot)
 }
 
 // makePutioFile returns a putio.File with a non-existent name so
@@ -683,4 +685,87 @@ func TestProcessFailedTransfersStaysFailedOnGetFilesError(t *testing.T) {
 	if ctx.GetState() != TransferLifecycleDownloading {
 		t.Errorf("state after second tick = %s, want Downloading", ctx.GetState())
 	}
+}
+
+// TestCheckTransfersAndGetTransfersRace exercises the publish/read pattern on
+// TransferProcessor.transfers under -race. checkTransfers swaps the snapshot
+// each tick; GetTransfers reads it on every *arr poll. Before the
+// atomic.Pointer switch, this was a write-vs-read on a plain map field. The
+// test only asserts no race / no panic — the contents reader sees on a given
+// call are intentionally racy in time but must always be a coherent snapshot.
+func TestCheckTransfersAndGetTransfersRace(t *testing.T) {
+	// Two snapshots that differ in length and Status keys. checkTransfers
+	// alternates between them, so any torn read would surface as a slice
+	// length mismatch or a transfer with the wrong SaveParentID — but mostly
+	// the test is here to give -race something to catch. Statuses are
+	// limited to IN_QUEUE/WAITING/DOWNLOADING/PREPARING to avoid the
+	// side-effect-heavy ready/errored paths; this test is about the
+	// publish/read pattern, not transfer processing.
+	snapshots := [][]*putio.Transfer{
+		{
+			{ID: 1, Status: "DOWNLOADING", SaveParentID: 42},
+			{ID: 2, Status: "WAITING", SaveParentID: 42},
+			{ID: 3, Status: "PREPARING", SaveParentID: 42},
+		},
+		{
+			{ID: 1, Status: "DOWNLOADING", SaveParentID: 42},
+			{ID: 4, Status: "IN_QUEUE", SaveParentID: 42},
+		},
+	}
+	var pick atomic.Int32
+	client := &fakePutioClient{
+		getTransfersFn: func() ([]*putio.Transfer, error) {
+			n := pick.Add(1) - 1
+			return snapshots[int(n)%len(snapshots)], nil
+		},
+	}
+	m := newTestManagerWithClient(client)
+	m.processor.folderID = 42
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// One writer goroutine driving checkTransfers in a tight loop.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				m.processor.checkTransfers()
+			}
+		}
+	}()
+
+	// Several reader goroutines hammering GetTransfers.
+	const readers = 8
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					ts := m.processor.GetTransfers()
+					// Coherent-snapshot check: every transfer returned must
+					// belong to folderID. A torn read could surface as a stale
+					// pointer with a wrong SaveParentID.
+					for _, tr := range ts {
+						if tr.SaveParentID != 42 {
+							t.Errorf("got transfer with SaveParentID=%d, want 42", tr.SaveParentID)
+							return
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

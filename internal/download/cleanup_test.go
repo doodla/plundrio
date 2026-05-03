@@ -29,9 +29,16 @@ type fakePutioClient struct {
 	// (transfers_test.go uses these to drive the failed-retry cascade).
 	getAllTransferFilesFn func(fileID int64) ([]*putio.File, error)
 	retryTransferFn       func(transferID int64) (*putio.Transfer, error)
+	getTransfersFn        func() ([]*putio.Transfer, error)
 }
 
 func (f *fakePutioClient) GetTransfers(ctx context.Context) ([]*putio.Transfer, error) {
+	f.mu.Lock()
+	fn := f.getTransfersFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
 	return nil, nil
 }
 func (f *fakePutioClient) GetAllTransferFiles(ctx context.Context, fileID int64) ([]*putio.File, error) {
