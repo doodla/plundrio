@@ -36,7 +36,7 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 `release.yml` builds all four targets (native, aarch64, docker, docker-aarch64) at release publish.
 
-**Important**: When Go dependencies change (`go.mod`/`go.sum`), the `vendorHash` in `flake.nix` (line 169) must be updated. Build the project with Nix; the error message will contain the correct hash.
+**Important**: When Go dependencies change (`go.mod`/`go.sum`), regenerate `gomod2nix.toml` — `nix develop -c gomod2nix generate` from the repo root, or `nix run github:nix-community/gomod2nix` if not in the dev shell. The flake reads `modules = ./gomod2nix.toml` (no `vendorHash` — `buildGoApplication` resolves modules from the lockfile).
 
 ## Fork-only
 

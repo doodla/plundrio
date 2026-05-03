@@ -120,7 +120,7 @@ Before installing plundrio, ensure you have:
 ### Using Go
 
 ```bash
-go install github.com/elsbrock/plundrio/cmd/plundrio@latest
+go install github.com/doodla/plundrio/cmd/plundrio@latest
 ```
 
 ### Using NixOS
@@ -131,7 +131,7 @@ plundrio can be integrated directly into your NixOS configuration as a service:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    plundrio.url = "github:elsbrock/plundrio";
+    plundrio.url = "github:doodla/plundrio";
   };
 
   outputs = { self, nixpkgs, plundrio, ... }: {
@@ -168,7 +168,7 @@ The NixOS module:
 ### Using Docker
 
 ```bash
-docker run --rm -it ghcr.io/elsbrock/plundrio:latest -- --help
+docker run --rm -it ghcr.io/doodla/plundrio:latest -- --help
 ```
 
 Make sure to expose the transmission RPC port (default 9091) and mount the download directory:
@@ -181,14 +181,14 @@ docker run -d \
   -e PLDR_TOKEN=your-token \
   -e PLDR_TARGET=/downloads \
   -e PLDR_FOLDER=plundrio \
-  ghcr.io/elsbrock/plundrio:latest
+  ghcr.io/doodla/plundrio:latest
 ```
 
 The Docker image is available for both x86_64 and ARM64 architectures. Docker will automatically pull the correct version for your platform.
 
 ### From Releases
 
-Download the latest binary package for your platform (x86_64-linux or aarch64-linux) from the [releases page](https://github.com/elsbrock/plundrio/releases). The multi-arch Docker image is available on GHCR (see [Using Docker](#using-docker)).
+Download the latest binary package for your platform (x86_64-linux or aarch64-linux) from the [releases page](https://github.com/doodla/plundrio/releases). The multi-arch Docker image is available on GHCR (see [Using Docker](#using-docker)).
 
 ## 🚀 Getting Started
 
@@ -242,7 +242,7 @@ download_start_window:         # Optional local download start window
   enabled: false
   start: "23:00"
   end: "05:00"
-log_level: "info"              # Log level (trace,debug,info,warn,error,fatal,panic,none,pretty)
+log_level: "info"              # Log level (debug,info,warn,error,fatal,none)
 ```
 
 `download_start_window` only gates when plundrio may begin a new local download. It does not stop Put.io transfers from being created, and it does not interrupt downloads that are already in progress.

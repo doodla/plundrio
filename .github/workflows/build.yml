@@ -25,7 +25,10 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # Pinned: `version: latest` would silently drift on every default-linter
+          # change in golangci-lint and turn main red without a code change. Bump
+          # this deliberately and address whatever new defaults flag.
+          version: v2.12.1
 
   nix:
     runs-on: ubuntu-latest

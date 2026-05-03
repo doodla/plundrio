@@ -70,7 +70,7 @@ gh release create vX.Y.Z --draft --title "vX.Y.Z" --notes "$(cat <<'EOF'
 ## New Contributors
 * @<user> made their first contribution in #<number>
 
-**Full Changelog**: https://github.com/elsbrock/plundrio/compare/vPREV...vNEW
+**Full Changelog**: https://github.com/doodla/plundrio/compare/vPREV...vNEW
 EOF
 )"
 ```
@@ -81,7 +81,7 @@ Categorize changes into sections as appropriate:
 - **Improvements** for enhancements and refactoring
 - **Breaking Changes** if any
 
-Only include sections that have entries. Only include "New Contributors" if there are first-time contributors. Check with `gh api repos/elsbrock/plundrio/contributors` if unsure.
+Only include sections that have entries. Only include "New Contributors" if there are first-time contributors. Check with `gh api repos/doodla/plundrio/contributors` if unsure.
 
 ## Step 7: Report back
 

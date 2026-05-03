@@ -66,7 +66,7 @@
             };
 
             logLevel = lib.mkOption {
-              type = lib.types.enum [ "trace" "debug" "info" "warn" "error" "fatal" "panic" "none" "pretty" ];
+              type = lib.types.enum [ "debug" "info" "warn" "error" "fatal" "none" ];
               default = "info";
               description = "Log level";
             };
@@ -187,7 +187,7 @@
 
           meta = with pkgs.lib; {
             inherit description;
-            homepage = "https://github.com/elsbrock/${pname}";
+            homepage = "https://github.com/doodla/${pname}";
             license = licenses.${license};
             maintainers = [ maintainer ];
             platforms = platforms.linux;
