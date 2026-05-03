@@ -155,6 +155,34 @@ func TestExtractCategory(t *testing.T) {
 			downloadDir: "/downloads/tv/",
 			want:        "tv",
 		},
+		// Path-traversal cases: extractCategory must reject anything that
+		// escapes targetDir, otherwise the category gets joined into the
+		// download path and filepath.Join normalizes "../" — letting a
+		// misconfigured (or malicious) *arr write outside TargetDir.
+		{
+			name:        "escape to absolute path outside",
+			targetDir:   "/downloads",
+			downloadDir: "/etc",
+			want:        "",
+		},
+		{
+			name:        "escape via dotdot in absolute path",
+			targetDir:   "/downloads",
+			downloadDir: "/downloads/../etc",
+			want:        "",
+		},
+		{
+			name:        "relative dotdot",
+			targetDir:   "/downloads",
+			downloadDir: "../foo",
+			want:        "",
+		},
+		{
+			name:        "deeper escape",
+			targetDir:   "/downloads",
+			downloadDir: "/downloads/sub/../../etc",
+			want:        "",
+		},
 	}
 
 	for _, tt := range tests {
