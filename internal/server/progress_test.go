@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/doodla/plundrio/internal/download"
@@ -252,5 +253,57 @@ func TestCalculateProgress(t *testing.T) {
 				t.Errorf("LeftUntilDone = %d, want %d", got.LeftUntilDone, tt.wantLeftUntilDone)
 			}
 		})
+	}
+}
+
+// TestCalculateProgressPermanentFailureSurfaces covers the path that lets *arr
+// give up: a transfer in TransferLifecycleFailed with the permanent flag set
+// (cascade exhausted in transfers.go) must report Stopped + non-empty Error.
+// A Failed transfer *without* the permanent flag is still being retried and
+// must look like Downloading so progress doesn't regress mid-cascade.
+func TestCalculateProgressPermanentFailureSurfaces(t *testing.T) {
+	// Use a real coordinator to set the permanent flag — there's no
+	// cross-package setter, which is the point: only the cascade can declare
+	// a transfer permanently failed.
+	tc := download.NewTransferCoordinator(func(int64) {})
+	ctx := tc.InitiateTransfer(1, "movie", 999, 1)
+	ctx.SetTotalSize(1000)
+	if err := tc.MarkPermanentlyFailed(1, errors.New("retries exhausted post put.io fallback")); err != nil {
+		t.Fatalf("MarkPermanentlyFailed: %v", err)
+	}
+
+	got := calculateProgress(progressInput{
+		PutioPercentDone: 100,
+		PutioStatus:      "COMPLETED",
+		PutioSize:        1000,
+		TransferCtx:      ctx,
+	})
+	if got.Status != trStatusStopped {
+		t.Errorf("Status = %d, want trStatusStopped (%d)", got.Status, trStatusStopped)
+	}
+	if got.Error == "" {
+		t.Errorf("Error = %q, want non-empty so handler can populate Transmission errorString", got.Error)
+	}
+
+	// Transient Failed (still being retried) should NOT surface as stopped —
+	// no permanent flag → looks like Downloading so the cascade can keep
+	// working without flapping the *arr UI.
+	tc2 := download.NewTransferCoordinator(func(int64) {})
+	ctx2 := tc2.InitiateTransfer(2, "movie", 999, 1)
+	ctx2.SetTotalSize(1000)
+	if err := tc2.FailTransfer(2, errors.New("CDN reset")); err != nil {
+		t.Fatalf("FailTransfer: %v", err)
+	}
+	got2 := calculateProgress(progressInput{
+		PutioPercentDone: 100,
+		PutioStatus:      "COMPLETED",
+		PutioSize:        1000,
+		TransferCtx:      ctx2,
+	})
+	if got2.Status != trStatusDownload {
+		t.Errorf("transient Failed: Status = %d, want trStatusDownload (%d)", got2.Status, trStatusDownload)
+	}
+	if got2.Error != "" {
+		t.Errorf("transient Failed: Error = %q, want empty (still retrying)", got2.Error)
 	}
 }

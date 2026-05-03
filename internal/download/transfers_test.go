@@ -273,6 +273,9 @@ func TestProcessFailedTransfersPermanentFailWhenPutioStuck(t *testing.T) {
 	if ctx.GetState() != TransferLifecycleFailed {
 		t.Errorf("state = %s, want Failed", ctx.GetState())
 	}
+	if !ctx.IsPermanent() {
+		t.Errorf("ctx.IsPermanent() = false, want true so the server surfaces an error to *arr")
+	}
 }
 
 func TestProcessFailedTransfersRequeueAfterPutioRecovery(t *testing.T) {
@@ -337,6 +340,9 @@ func TestProcessFailedTransfersPostFallbackPermanentOnSecondFailure(t *testing.T
 	if ctx.GetError() == nil {
 		t.Errorf("err = nil, want non-nil after permanent fail")
 	}
+	if !ctx.IsPermanent() {
+		t.Errorf("ctx.IsPermanent() = false, want true so the server surfaces an error to *arr")
+	}
 }
 
 func TestProcessFailedTransfersPermanentSkipped(t *testing.T) {
@@ -393,6 +399,9 @@ func TestProcessFailedTransfersHandlesDeletedPutioTransfer(t *testing.T) {
 	ctx, _ := m.coordinator.GetTransferContext(1)
 	if ctx.GetError() == nil {
 		t.Errorf("err = nil, want non-nil")
+	}
+	if !ctx.IsPermanent() {
+		t.Errorf("ctx.IsPermanent() = false, want true so the server surfaces an error to *arr")
 	}
 }
 

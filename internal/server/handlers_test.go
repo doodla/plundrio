@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -430,6 +431,45 @@ func TestHandleTorrentGetFiltersByID(t *testing.T) {
 	}
 	if h := torrents[0].(map[string]interface{})["hashString"]; h != "wanted" {
 		t.Errorf("hashString = %v, want wanted", h)
+	}
+}
+
+// TestHandleTorrentGetSurfacesPermanentFailure verifies that when plundrio's
+// retry cascade has given up on a transfer, the torrent-get response carries
+// error=true so *arr's Failed Download Handling can drop the grab. Without
+// this surface, Sonarr/Radarr wait forever for transfers plundrio has already
+// abandoned — the operator only finds out by spotting missing episodes.
+func TestHandleTorrentGetSurfacesPermanentFailure(t *testing.T) {
+	dl := newFakeDownloadService()
+	dl.transfers = []*putio.Transfer{
+		{ID: 100, Hash: "abc", Name: "movie.mkv", Status: "COMPLETED", Size: 1024, PercentDone: 100},
+	}
+	// Build a real TransferContext, mark it permanently failed via the
+	// coordinator (the only path that sets the flag).
+	tc := download.NewTransferCoordinator(func(int64) {})
+	ctx := tc.InitiateTransfer(100, "movie.mkv", 999, 1)
+	ctx.SetTotalSize(1024)
+	if err := tc.MarkPermanentlyFailed(100, errors.New("retries exhausted post put.io fallback")); err != nil {
+		t.Fatalf("MarkPermanentlyFailed: %v", err)
+	}
+	dl.transferCtxs[100] = ctx
+
+	srv := newTestServer(t, &fakePutioClient{}, dl)
+	req := rpcRequest(t, "torrent-get", map[string]interface{}{})
+	w := httptest.NewRecorder()
+	srv.handleRPC(w, req)
+
+	resp := decodeRPCResponse(t, w.Body.Bytes())
+	torrents, _ := resp.Arguments["torrents"].([]interface{})
+	if len(torrents) != 1 {
+		t.Fatalf("expected 1 torrent, got %d", len(torrents))
+	}
+	tr := torrents[0].(map[string]interface{})
+	if got, _ := tr["error"].(bool); !got {
+		t.Errorf("error = %v, want true so *arr's failed-download handling fires", tr["error"])
+	}
+	if got, _ := tr["errorString"].(string); got == "" {
+		t.Errorf("errorString = %q, want non-empty", got)
 	}
 }
 

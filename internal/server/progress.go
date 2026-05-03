@@ -32,6 +32,12 @@ type progressResult struct {
 	LeftUntilDone int64     // bytes remaining
 	LocalETA      time.Time // local ETA override (zero if not applicable)
 	LocalSpeed    float64   // local download speed override in bytes/sec (0 if not applicable)
+	// Error is populated when plundrio's retry cascade has permanently
+	// abandoned the transfer (vs. put.io's own ErrorMessage, which the
+	// caller already surfaces). The handler maps this to Transmission
+	// error=true so *arr's Failed Download Handling fires instead of
+	// waiting for a transfer plundrio is no longer working on.
+	Error string
 }
 
 // calculateProgress computes the combined progress for a transfer.
@@ -101,6 +107,7 @@ func calculateProgressWithContext(in progressInput) progressResult {
 	}
 
 	var status int
+	var permanentErr string
 	switch state {
 	case download.TransferLifecycleProcessed:
 		percentDone = 1.0
@@ -108,6 +115,20 @@ func calculateProgressWithContext(in progressInput) progressResult {
 		status = trStatusSeed
 	case download.TransferLifecycleCompleted:
 		status = mapPutioStatusValue(in.PutioStatus)
+	case download.TransferLifecycleFailed:
+		// Only report failure to *arr once the cascade has given up. A
+		// transient Failed (still being retried) reports as Downloading so
+		// progress doesn't regress.
+		if ctx.IsPermanent() {
+			status = trStatusStopped
+			if e := ctx.GetError(); e != nil {
+				permanentErr = e.Error()
+			} else {
+				permanentErr = "transfer permanently failed"
+			}
+		} else {
+			status = trStatusDownload
+		}
 	default:
 		status = trStatusDownload
 	}
@@ -116,6 +137,7 @@ func calculateProgressWithContext(in progressInput) progressResult {
 		PercentDone:   percentDone,
 		Status:        status,
 		LeftUntilDone: leftUntilDone,
+		Error:         permanentErr,
 	}
 
 	if !localETA.IsZero() {

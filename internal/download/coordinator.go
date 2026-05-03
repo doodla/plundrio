@@ -319,6 +319,33 @@ func (tc *TransferCoordinator) RequeueFailedTransfer(transferID int64) error {
 	return nil
 }
 
+// MarkPermanentlyFailed marks a transfer as failed with no further retries.
+// Used by the cascade in transfers.go after exhausting local + put.io retries.
+// Distinct from FailTransfer (which leaves the transfer in a state the cascade
+// can pick up next tick) — this terminal flag is the signal the server package
+// reads to surface a Transmission error to *arr.
+func (tc *TransferCoordinator) MarkPermanentlyFailed(transferID int64, err error) error {
+	ctx, ok := tc.GetTransferContext(transferID)
+	if !ok {
+		return NewTransferNotFoundError(transferID)
+	}
+
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
+	ctx.state = TransferLifecycleFailed
+	ctx.err = err
+	ctx.permanent = true
+
+	log.Error("transfer").
+		Int64("id", transferID).
+		Str("name", ctx.Name).
+		Err(err).
+		Msg("Transfer permanently failed")
+
+	return nil
+}
+
 // FailTransfer marks a transfer as failed
 func (tc *TransferCoordinator) FailTransfer(transferID int64, err error) error {
 	ctx, ok := tc.GetTransferContext(transferID)

@@ -745,7 +745,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 		log.Warn("transfers").
 			Int64("id", id).Str("name", ctx.Name).
 			Msg("Failed transfer no longer present on put.io, marking permanently failed")
-		_ = p.manager.coordinator.FailTransfer(id, errors.New("transfer no longer present on put.io"))
+		_ = p.manager.coordinator.MarkPermanentlyFailed(id, errors.New("transfer no longer present on put.io"))
 		rs.Permanent = true
 		return
 	}
@@ -759,7 +759,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 			log.Error("transfers").
 				Int64("id", id).Str("name", ctx.Name).
 				Msg("Local retries and put.io fallback exhausted, marking permanently failed")
-			_ = p.manager.coordinator.FailTransfer(id, errors.New("retries exhausted post put.io fallback"))
+			_ = p.manager.coordinator.MarkPermanentlyFailed(id, errors.New("retries exhausted post put.io fallback"))
 			rs.Permanent = true
 			return
 		}
@@ -772,7 +772,7 @@ func (p *TransferProcessor) tryRetryFailedTransfer(id int64, ctx *TransferContex
 			log.Error("transfers").
 				Int64("id", id).Str("name", ctx.Name).Str("putio_status", putioTransfer.Status).
 				Msg("put.io fallback did not recover transfer, marking permanently failed")
-			_ = p.manager.coordinator.FailTransfer(id, fmt.Errorf("put.io status %s after fallback", putioTransfer.Status))
+			_ = p.manager.coordinator.MarkPermanentlyFailed(id, fmt.Errorf("put.io status %s after fallback", putioTransfer.Status))
 			rs.Permanent = true
 			return
 		}

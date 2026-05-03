@@ -77,7 +77,13 @@ type TransferContext struct {
 	localETA       time.Time
 	state          TransferLifecycleState
 	err            error
-	mu             sync.RWMutex
+	// permanent is set when the retry cascade in transfers.go gives up. It
+	// distinguishes "transient Failed, will retry next tick" from "Failed
+	// for good, surface to *arr." Without this, Sonarr/Radarr can't tell
+	// the difference and wait forever for a transfer plundrio has already
+	// abandoned. Surfaced via IsPermanent() to the server package.
+	permanent bool
+	mu        sync.RWMutex
 }
 
 // NewTransferContext creates a TransferContext for use in tests or cross-package setup.
@@ -154,4 +160,14 @@ func (tc *TransferContext) GetError() error {
 	e := tc.err
 	tc.mu.RUnlock()
 	return e
+}
+
+// IsPermanent reports whether the transfer has been marked permanently failed
+// by the retry cascade. The server package uses this to surface a Transmission
+// error to *arr instead of leaving it stuck mid-progress.
+func (tc *TransferContext) IsPermanent() bool {
+	tc.mu.RLock()
+	p := tc.permanent
+	tc.mu.RUnlock()
+	return p
 }

@@ -216,6 +216,15 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		eta := t.EstimatedTime
 		rateDownload := t.DownloadSpeed
 
+		// Pick the error to report. plundrio's permanently-failed cascade wins
+		// over put.io's ErrorMessage: if both are set, plundrio's reflects the
+		// terminal decision (we already gave up retrying), and that's the one
+		// *arr should act on.
+		errString := t.ErrorMessage
+		if prog.Error != "" {
+			errString = prog.Error
+		}
+
 		// Override ETA and rate with local values when available
 		if !prog.LocalETA.IsZero() {
 			if secsUntil := int64(time.Until(prog.LocalETA).Seconds()); secsUntil > 0 {
@@ -255,8 +264,8 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 				}
 				return 0
 			}(),
-			"error":       t.ErrorMessage != "",
-			"errorString": t.ErrorMessage,
+			"error":       errString != "",
+			"errorString": errString,
 		}
 
 		torrents = append(torrents, torrentInfo)

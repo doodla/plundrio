@@ -326,6 +326,46 @@ func TestCoordinatorFailTransferWithRegularError(t *testing.T) {
 	}
 }
 
+func TestCoordinatorMarkPermanentlyFailed(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	ctx := tc.InitiateTransfer(1, "test", 100, 1)
+
+	if ctx.IsPermanent() {
+		t.Fatal("precondition: IsPermanent = true on fresh context")
+	}
+
+	permErr := errors.New("retries exhausted post put.io fallback")
+	if err := tc.MarkPermanentlyFailed(1, permErr); err != nil {
+		t.Fatalf("MarkPermanentlyFailed: %v", err)
+	}
+
+	if ctx.GetState() != TransferLifecycleFailed {
+		t.Errorf("state = %s, want Failed", ctx.GetState())
+	}
+	if !ctx.IsPermanent() {
+		t.Errorf("IsPermanent = false, want true")
+	}
+	if got := ctx.GetError(); got == nil || got.Error() != permErr.Error() {
+		t.Errorf("err = %v, want %v", got, permErr)
+	}
+}
+
+func TestCoordinatorMarkPermanentlyFailedNotFound(t *testing.T) {
+	m := newTestManager()
+	tc := m.coordinator
+
+	err := tc.MarkPermanentlyFailed(999, errors.New("some error"))
+	if err == nil {
+		t.Fatal("expected error for unknown transfer")
+	}
+	var dlErr *DownloadError
+	if !errors.As(err, &dlErr) || dlErr.Type != "TransferNotFound" {
+		t.Fatalf("expected TransferNotFound error, got: %v", err)
+	}
+}
+
 func TestCoordinatorFailTransferNotFound(t *testing.T) {
 	m := newTestManager()
 	tc := m.coordinator
