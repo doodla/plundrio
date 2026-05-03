@@ -134,12 +134,10 @@ Environment prefix: `PLDR_` (e.g., `PLDR_TOKEN`, `PLDR_TARGET`, `PLDR_FOLDER`). 
 
 Unit tests live alongside their packages (e.g. `internal/download/coordinator_test.go`, `transfers_test.go`, `cleanup_test.go`). No integration tests against live put.io. Style: standard `testing.T`, no testify or other assertion libs — match the existing files. The `fakePutioClient` in `cleanup_test.go` is the shared in-memory fake; extend it rather than introducing a parallel one.
 
-## Deployment context (security model)
+## Security model
 
-The fork's only known production deployment is the homelab `arr-net` Docker network on doodle-nas: plundrio runs without a `ports:` mapping, reachable only from sonarr/radarr containers via Docker DNS. Several pieces of the codebase are intentional under that model and should not be "hardened" without first asking whether the deployment shape is changing:
+Several choices in the codebase assume the operator runs plundrio behind a private network boundary (e.g. on an internal Docker network reachable only from the *arr peers, with no published port). Don't "harden" these without first confirming the deployment still has that boundary:
 
-- `handleRPC` accepts any non-empty session ID and has no HTTP Basic auth (`internal/server/handlers.go`). Network isolation is the auth substitute. **If anyone ever maps `:9091` to the LAN, this becomes exploitable** — anyone on the LAN can drive `torrent-add`/`torrent-remove` against the operator's put.io account.
-- `http.Server` is constructed without `ReadHeaderTimeout` etc. (`server.go`). Same story — slowloris is irrelevant on an internal Docker network, but would matter on a public bind.
-- The container runs as root with no PUID/PGID handling. Works because the *arr peers in this stack are equally permissive on Synology. Don't assume that holds for other deployments.
-
-When in doubt: read `~/homelab/hosts/doodle-nas/docker-compose/plundrio/compose.yaml` and the README next to it.
+- `handleRPC` accepts any non-empty session ID and has no HTTP Basic auth (`internal/server/handlers.go`). Network isolation is the auth substitute. **If `:9091` is ever bound to a LAN-reachable interface, this is exploitable** — anyone on the network can drive `torrent-add`/`torrent-remove` against the operator's put.io account.
+- `http.Server` is constructed without `ReadHeaderTimeout` etc. (`server.go`). Same story: slowloris is irrelevant on an internal interface, but would matter on a public bind.
+- The Docker image runs as root with no PUID/PGID handling. Works when the peer containers it shares a volume with are equally permissive; not a safe default for arbitrary deploys.
