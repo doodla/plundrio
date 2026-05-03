@@ -356,7 +356,7 @@ func (p *TransferProcessor) processTransfer(transfer *putio.Transfer) {
 
 	if len(files) == 0 {
 		err := NewNoFilesFoundError(transfer.ID)
-		p.manager.coordinator.FailTransfer(transfer.ID, err)
+		_ = p.manager.coordinator.FailTransfer(transfer.ID, err)
 		return
 	}
 
@@ -374,7 +374,7 @@ func (p *TransferProcessor) processTransfer(transfer *putio.Transfer) {
 			Str("name", transfer.Name).
 			Int64("id", transfer.ID).
 			Msg("All files already exist, completing transfer")
-		p.manager.coordinator.CompleteTransfer(transfer.ID)
+		_ = p.manager.coordinator.CompleteTransfer(transfer.ID)
 		return
 	}
 }
@@ -511,7 +511,7 @@ func (p *TransferProcessor) initializeTransfer(transfer *putio.Transfer, filesTo
 			Int64("id", transfer.ID).
 			Err(err).
 			Msg("Failed to start transfer download")
-		p.manager.coordinator.FailTransfer(transfer.ID, err)
+		_ = p.manager.coordinator.FailTransfer(transfer.ID, err)
 		return false
 	}
 
