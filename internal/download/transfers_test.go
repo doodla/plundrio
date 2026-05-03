@@ -769,3 +769,138 @@ func TestCheckTransfersAndGetTransfersRace(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// processErroredTransfers covers a different path from
+// processFailedTransfers — see boundary comments in transfers.go. These
+// tests exercise that path end-to-end: retries up to the cap, deletion
+// after the cap, API errors during RetryTransfer, and the no-op behavior
+// for transfers from a different folder.
+
+func setErroredTransfers(p *TransferProcessor, transfers ...*putio.Transfer) {
+	snapshot := map[string][]*putio.Transfer{"ERROR": transfers}
+	p.transfers.Store(&snapshot)
+}
+
+func TestProcessErroredTransfersRetriesUpToCap(t *testing.T) {
+	client := &fakePutioClient{
+		retryTransferFn: func(id int64) (*putio.Transfer, error) {
+			return &putio.Transfer{ID: id, Status: "IN_QUEUE"}, nil
+		},
+	}
+	m := newTestManagerWithClient(client)
+
+	transfer := &putio.Transfer{ID: 1, SaveParentID: m.processor.folderID, Status: "ERROR", Name: "x"}
+	setErroredTransfers(m.processor, transfer)
+
+	// Three retry ticks, each must call RetryTransfer.
+	for i := 0; i < 3; i++ {
+		m.processor.processErroredTransfers()
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if got := len(client.retryTransferCalls); got != 3 {
+		t.Errorf("RetryTransfer calls = %d, want 3", got)
+	}
+	if len(client.deleteTransferCalls) != 0 {
+		t.Errorf("DeleteTransfer must not run before cap; got %v", client.deleteTransferCalls)
+	}
+}
+
+func TestProcessErroredTransfersDeletesAfterCap(t *testing.T) {
+	client := &fakePutioClient{
+		retryTransferFn: func(id int64) (*putio.Transfer, error) {
+			return &putio.Transfer{ID: id, Status: "IN_QUEUE"}, nil
+		},
+	}
+	m := newTestManagerWithClient(client)
+
+	transfer := &putio.Transfer{ID: 1, SaveParentID: m.processor.folderID, Status: "ERROR", Name: "x"}
+	setErroredTransfers(m.processor, transfer)
+
+	// 3 retry ticks + 1 delete tick = 4 calls total. After the cap is
+	// reached, the next tick deletes (no further RetryTransfer call).
+	for i := 0; i < 4; i++ {
+		m.processor.processErroredTransfers()
+	}
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if got := len(client.retryTransferCalls); got != 3 {
+		t.Errorf("RetryTransfer calls = %d, want 3 (cap)", got)
+	}
+	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 1 {
+		t.Errorf("DeleteTransfer calls = %v, want [1]", client.deleteTransferCalls)
+	}
+	// retryAttempts entry was cleared after successful delete.
+	if _, ok := m.processor.retryAttempts.Load(int64(1)); ok {
+		t.Errorf("retryAttempts entry must be cleared after delete")
+	}
+}
+
+func TestProcessErroredTransfersToleratesRetryAPIError(t *testing.T) {
+	// RetryTransfer returns an error; the retry counter still advances
+	// (the failure was logged at error level), and a future tick will try
+	// again until the cap. This tests the err != nil branch.
+	client := &fakePutioClient{
+		retryTransferFn: func(id int64) (*putio.Transfer, error) {
+			return nil, errors.New("upstream busy")
+		},
+	}
+	m := newTestManagerWithClient(client)
+
+	transfer := &putio.Transfer{ID: 1, SaveParentID: m.processor.folderID, Status: "ERROR", Name: "x"}
+	setErroredTransfers(m.processor, transfer)
+
+	m.processor.processErroredTransfers()
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if got := len(client.retryTransferCalls); got != 1 {
+		t.Errorf("RetryTransfer calls = %d, want 1", got)
+	}
+	count, _ := m.processor.retryAttempts.Load(int64(1))
+	if count != 1 {
+		t.Errorf("retryAttempts after API error = %v, want 1 (counter advances on attempt, regardless of error)", count)
+	}
+}
+
+func TestProcessErroredTransfersToleratesNilReturnFromRetry(t *testing.T) {
+	// Some put.io API responses return (nil, nil) for RetryTransfer.
+	// The success path used to dereference retried.Status unconditionally
+	// and would panic; this test guards the nil-safe rewrite.
+	client := &fakePutioClient{
+		retryTransferFn: func(id int64) (*putio.Transfer, error) {
+			return nil, nil
+		},
+	}
+	m := newTestManagerWithClient(client)
+
+	transfer := &putio.Transfer{ID: 1, SaveParentID: m.processor.folderID, Status: "ERROR", Name: "x"}
+	setErroredTransfers(m.processor, transfer)
+
+	// Must not panic.
+	m.processor.processErroredTransfers()
+}
+
+func TestProcessErroredTransfersDeleteFailureKeepsCounter(t *testing.T) {
+	// If DeleteTransfer fails on the post-cap tick, the retry counter
+	// must NOT be cleared — otherwise the next tick re-enters the
+	// retry-up-to-cap loop and would re-call RetryTransfer 3 more times.
+	client := &fakePutioClient{
+		retryTransferFn: func(id int64) (*putio.Transfer, error) {
+			return &putio.Transfer{ID: id, Status: "IN_QUEUE"}, nil
+		},
+		deleteTransferErr: errors.New("upstream"),
+	}
+	m := newTestManagerWithClient(client)
+
+	transfer := &putio.Transfer{ID: 1, SaveParentID: m.processor.folderID, Status: "ERROR", Name: "x"}
+	setErroredTransfers(m.processor, transfer)
+
+	for i := 0; i < 4; i++ {
+		m.processor.processErroredTransfers()
+	}
+	if v, ok := m.processor.retryAttempts.Load(int64(1)); !ok || v.(int) != 3 {
+		t.Errorf("retryAttempts = %v (loaded=%v), want 3 (counter must persist across failed delete)", v, ok)
+	}
+}

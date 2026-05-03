@@ -23,9 +23,21 @@ import (
 type TransferProcessor struct {
 	manager            *Manager
 	transfers          atomic.Pointer[map[string][]*putio.Transfer] // Status -> Transfers (immutable once published)
-	processedTransfers sync.Map                                     // map[int64]bool - Tracks transfers that have been processed locally
-	retryAttempts      sync.Map                                     // map[int64]int - Tracks retry attempts for put.io ERROR transfers (processErroredTransfers)
-	failedRetryStates  sync.Map                                     // map[int64]*localRetryState - Tracks local retry attempts for TransferLifecycleFailed transfers (processFailedTransfers)
+	processedTransfers sync.Map // map[int64]bool - Tracks transfers that have been processed locally
+
+	// retryAttempts and failedRetryStates back two distinct retry paths.
+	// retryAttempts: retry-count for transfers in put.io status "ERROR"
+	// (i.e. put.io itself failed to fetch the torrent). Used only by
+	// processErroredTransfers — calls RetryTransfer up to a cap, then
+	// DeleteTransfer.
+	// failedRetryStates: per-transfer cascade state for transfers in our
+	// internal TransferLifecycleFailed (i.e. plundrio failed to download
+	// the file *from* put.io even though put.io has it). Used only by
+	// processFailedTransfers — local requeue with backoff, then put.io
+	// RetryTransfer fallback, then a final local retry, then Permanent.
+	// The two paths operate on disjoint conditions and don't share state.
+	retryAttempts     sync.Map // map[int64]int — see comment above
+	failedRetryStates sync.Map // map[int64]*localRetryState — see comment above
 	folderID           int64
 	targetDir          string
 
@@ -573,7 +585,18 @@ func (p *TransferProcessor) initializeTransfer(transfer *putio.Transfer, filesTo
 	return true
 }
 
-// processErroredTransfers handles failed transfers with retry logic
+// processErroredTransfers handles transfers in put.io's "ERROR" status —
+// torrents put.io itself failed to fetch (DHT timeouts, dead trackers,
+// etc.). For up to maxRetryAttempts ticks, asks put.io to retry; after
+// the cap, deletes the transfer record so it stops appearing in our
+// view. State per transfer lives in retryAttempts.
+//
+// This is *not* the path for plundrio-internal failures (couldn't fetch
+// download URL, network errors during local download). Those are
+// TransferLifecycleFailed and flow through processFailedTransfers,
+// which has its own state (failedRetryStates), backoff schedule, and
+// put.io fallback. The two operate on disjoint conditions and share
+// nothing.
 func (p *TransferProcessor) processErroredTransfers() {
 	const maxRetryAttempts = 3
 
@@ -609,11 +632,13 @@ func (p *TransferProcessor) processErroredTransfers() {
 					Err(err).
 					Msgf("Failed to retry transfer (attempt %d of %d)", retryCount+1, maxRetryAttempts)
 			} else {
-				log.Info("transfers").
+				logEvent := log.Info("transfers").
 					Str("name", transfer.Name).
-					Int64("id", transfer.ID).
-					Str("new_status", retried.Status).
-					Msgf("Successfully retried transfer (attempt %d of %d)", retryCount+1, maxRetryAttempts)
+					Int64("id", transfer.ID)
+				if retried != nil {
+					logEvent = logEvent.Str("new_status", retried.Status)
+				}
+				logEvent.Msgf("Successfully retried transfer (attempt %d of %d)", retryCount+1, maxRetryAttempts)
 			}
 		} else {
 			// Log that we're giving up after max retries
@@ -647,10 +672,18 @@ func (p *TransferProcessor) MarkTransferProcessed(transferID int64) {
 }
 
 // processFailedTransfers drives the local retry cascade for transfers in
-// TransferLifecycleFailed. Cascade per transfer: up to maxLocalRetryAttempts
-// local requeues with localRetryBackoff between them, then one put.io
-// RetryTransfer fallback, then a single post-fallback local retry on
-// recovery, then Permanent. State per transfer lives in failedRetryStates.
+// TransferLifecycleFailed (plundrio-internal failures during local
+// download — couldn't fetch download URL, network errors, etc.). Cascade
+// per transfer: up to maxLocalRetryAttempts local requeues with
+// localRetryBackoff between them, then one put.io RetryTransfer fallback,
+// then a single post-fallback local retry on recovery, then Permanent.
+// State per transfer lives in failedRetryStates.
+//
+// This is *not* the path for put.io's "ERROR" status (torrents put.io
+// itself failed to fetch). Those flow through processErroredTransfers
+// with its own state (retryAttempts) and a much simpler retry shape
+// (RetryTransfer up to a cap, then DeleteTransfer). The two operate on
+// disjoint conditions and share nothing.
 func (p *TransferProcessor) processFailedTransfers() {
 	p.processFailedTransfersAt(time.Now())
 }
