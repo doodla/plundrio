@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/config"
 	"github.com/doodla/plundrio/internal/download"
 	"github.com/doodla/plundrio/internal/log"

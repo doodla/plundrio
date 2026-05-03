@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 	"golang.org/x/oauth2"
 )
 

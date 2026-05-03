@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 )
 
 // DownloadError is the base error type for download-related errors

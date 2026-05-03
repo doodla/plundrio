@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/log"
 )
 

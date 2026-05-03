@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 )
 
 // driveTransferToFailed runs a transfer through Initiate -> StartDownload ->

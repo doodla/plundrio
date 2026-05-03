@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/elsbrock/go-putio"
+	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/config"
 	"github.com/doodla/plundrio/internal/download"
 )
