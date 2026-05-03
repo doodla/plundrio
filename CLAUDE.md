@@ -134,8 +134,12 @@ Environment prefix: `PLDR_` (e.g., `PLDR_TOKEN`, `PLDR_TARGET`, `PLDR_FOLDER`). 
 
 Unit tests live alongside their packages (e.g. `internal/download/coordinator_test.go`, `transfers_test.go`, `cleanup_test.go`). No integration tests against live put.io. Style: standard `testing.T`, no testify or other assertion libs — match the existing files. The `fakePutioClient` in `cleanup_test.go` is the shared in-memory fake; extend it rather than introducing a parallel one.
 
-## Known Issues
+## Deployment context (security model)
 
-- `handleTorrentRemove` parses `DeleteLocalData` but never deletes local files (#23)
-- `GetTransfers()` filters by `SaveParentID == folderID`, so externally-added transfers are invisible (#17)
-- `DownloadDir` from *arr is parsed but ignored — all files go to flat `TargetDir` (#22)
+The fork's only known production deployment is the homelab `arr-net` Docker network on doodle-nas: plundrio runs without a `ports:` mapping, reachable only from sonarr/radarr containers via Docker DNS. Several pieces of the codebase are intentional under that model and should not be "hardened" without first asking whether the deployment shape is changing:
+
+- `handleRPC` accepts any non-empty session ID and has no HTTP Basic auth (`internal/server/handlers.go`). Network isolation is the auth substitute. **If anyone ever maps `:9091` to the LAN, this becomes exploitable** — anyone on the LAN can drive `torrent-add`/`torrent-remove` against the operator's put.io account.
+- `http.Server` is constructed without `ReadHeaderTimeout` etc. (`server.go`). Same story — slowloris is irrelevant on an internal Docker network, but would matter on a public bind.
+- The container runs as root with no PUID/PGID handling. Works because the *arr peers in this stack are equally permissive on Synology. Don't assume that holds for other deployments.
+
+When in doubt: read `~/homelab/hosts/doodle-nas/docker-compose/plundrio/compose.yaml` and the README next to it.
