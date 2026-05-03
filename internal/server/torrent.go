@@ -240,37 +240,21 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		}
 
 		torrents = append(torrents, torrentInfo)
-
-		// Log each torrent being added to the response
-		log.Debug("rpc").
-			Str("operation", "torrent-get").
-			Int64("id", t.ID).
-			Str("hash", t.Hash).
-			Str("name", t.Name).
-			Str("status", t.Status).
-			Int("size", t.Size).
-			Float64("percent_done", percentDone).
-			Msg("Added torrent to response")
 	}
 
-	// Log the final count of torrents in the response
+	// Per-torrent details already log via "Calculated progress" above and
+	// the marshaled-response dump on every poll was a debug-mode flood
+	// (three *arrs at 2-5s intervals). One summary line is enough — anyone
+	// who needs the full response can reconstruct it from the per-torrent
+	// fields.
 	log.Debug("rpc").
 		Str("operation", "torrent-get").
 		Int("torrents_count", len(torrents)).
 		Msg("Returning torrents")
 
-	result := map[string]interface{}{
+	return map[string]interface{}{
 		"torrents": torrents,
-	}
-
-	// Log the final response structure
-	resultBytes, _ := json.Marshal(result)
-	log.Debug("rpc").
-		Str("operation", "torrent-get").
-		Str("result", string(resultBytes)).
-		Msg("Final result structure")
-
-	return result, nil
+	}, nil
 }
 
 // handleTorrentRemove processes torrent-remove requests

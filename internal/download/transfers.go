@@ -21,6 +21,11 @@ type TransferProcessor struct {
 	failedRetryStates  sync.Map                     // map[int64]*localRetryState - Tracks local retry attempts for TransferLifecycleFailed transfers (processFailedTransfers)
 	folderID           int64
 	targetDir          string
+
+	// lastSummaryCounts caches the last status-count map logged by
+	// logTransferSummary so subsequent ticks with identical counts can
+	// skip the Info log. Single-writer (monitor goroutine), no lock needed.
+	lastSummaryCounts map[string]int
 }
 
 // localRetryState tracks a single failed transfer's progress through the
@@ -147,7 +152,11 @@ func (p *TransferProcessor) checkTransfers() {
 	p.finalizeCompletedTransfers()
 }
 
-// logTransferSummary logs counts of transfers in each status and detailed information for all transfers
+// logTransferSummary logs counts of transfers in each status. Info-level logs
+// only fire when counts changed since the previous tick; an idle queue would
+// otherwise flood operational logs with identical lines every
+// TransferCheckInterval. The same counts always fire at Debug for trace-level
+// visibility, plus the per-transfer detail dump.
 func (p *TransferProcessor) logTransferSummary() {
 	counts := map[string]int{
 		"IN_QUEUE":    len(p.transfers["IN_QUEUE"]),
@@ -160,7 +169,12 @@ func (p *TransferProcessor) logTransferSummary() {
 		"ERROR":       len(p.transfers["ERROR"]),
 	}
 
-	log.Info("transfers").
+	event := log.Debug("transfers")
+	if !sameCounts(p.lastSummaryCounts, counts) {
+		event = log.Info("transfers")
+		p.lastSummaryCounts = counts
+	}
+	event.
 		Int("queued", counts["IN_QUEUE"]).
 		Int("waiting", counts["WAITING"]).
 		Int("preparing", counts["PREPARING"]).
@@ -173,6 +187,19 @@ func (p *TransferProcessor) logTransferSummary() {
 
 	// Log detailed information for all transfers
 	p.logAllTransfersDetails()
+}
+
+// sameCounts compares two status-count maps for equality.
+func sameCounts(a, b map[string]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // logAllTransfersDetails logs detailed information for all transfers
