@@ -23,6 +23,15 @@ var (
 	version = "dev"
 )
 
+// startupCallTimeout caps each blocking put.io call made during runCmd
+// startup. Without it, an unreachable put.io (DNS not yet up after reboot,
+// captive portal, transient outage) leaves Authenticate / EnsureFolder
+// hanging on context.Background forever — systemd's Restart=on-failure
+// never fires because the process stays alive. 30s is slow enough to
+// tolerate a sluggish lookup, fast enough that systemd's restart loop
+// will heal a transient failure.
+const startupCallTimeout = 30 * time.Second
+
 var rootCmd = &cobra.Command{
 	Use:     "plundrio",
 	Short:   "Put.io automation tool",
@@ -128,14 +137,19 @@ var runCmd = &cobra.Command{
 
 		// Authenticate and get account info
 		log.Info("auth").Msg("Authenticating with Put.io...")
-		if err := client.Authenticate(context.Background()); err != nil {
+		authCtx, authCancel := context.WithTimeout(context.Background(), startupCallTimeout)
+		err = client.Authenticate(authCtx)
+		authCancel()
+		if err != nil {
 			log.Fatal("auth").Err(err).Msg("Failed to authenticate with Put.io")
 		}
 		log.Info("auth").Msg("Authentication successful")
 
 		// Create/get folder ID
 		log.Info("setup").Str("folder", cfg.PutioFolder).Msg("Setting up Put.io folder")
-		folderID, err := client.EnsureFolder(context.Background(), cfg.PutioFolder)
+		folderCtx, folderCancel := context.WithTimeout(context.Background(), startupCallTimeout)
+		folderID, err := client.EnsureFolder(folderCtx, cfg.PutioFolder)
+		folderCancel()
 		if err != nil {
 			log.Fatal("setup").Str("folder", cfg.PutioFolder).Err(err).Msg("Failed to create/get folder")
 		}
