@@ -29,6 +29,11 @@ type DownloadService interface {
 	SetCategory(hash, category string)
 	GetCategory(hash string) string
 	RemoveCategory(hash string)
+	// PurgeTransfer triggers the put.io-side delete + drops in-memory state
+	// for transferID. Tolerates put.io 404 and missing context. Called from
+	// handleTorrentRemove so the same code path runs whether removal is
+	// driven by an *arr client or by the retention janitor.
+	PurgeTransfer(transferID int64) error
 	Stop()
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/config"
@@ -147,11 +148,49 @@ func driveTransferToCleanup(t *testing.T, m *Manager, transferID, fileID int64) 
 	}
 }
 
-func TestCleanupHookDeletesFileThenTransfer(t *testing.T) {
+func TestCompleteTransferDoesNotPurgePutio(t *testing.T) {
+	// CompleteTransfer used to call DeleteFile + DeleteTransfer on put.io
+	// synchronously, which violated the *arr Transmission contract: the
+	// transfer would vanish from torrent-get before Radarr's next poll
+	// could observe it as Completed and trigger Import. The put.io delete
+	// is now deferred to PurgeTransfer (driven by torrent-remove RPC or
+	// the retention janitor).
 	client := &fakePutioClient{}
 	m := newTestManagerWithClient(client)
 
 	driveTransferToCleanup(t, m, 1, 100)
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.deleteFileCalls) != 0 {
+		t.Errorf("CompleteTransfer must not call DeleteFile; got %v", client.deleteFileCalls)
+	}
+	if len(client.deleteTransferCalls) != 0 {
+		t.Errorf("CompleteTransfer must not call DeleteTransfer; got %v", client.deleteTransferCalls)
+	}
+	// State still advances and the local-state cleanup hook still runs:
+	// the failedRetryStates entry (if any) was Delete()'d.
+	ctx, ok := m.coordinator.GetTransferContext(1)
+	if !ok {
+		t.Fatal("transfer context missing after CompleteTransfer")
+	}
+	if ctx.GetState() != TransferLifecycleProcessed {
+		t.Errorf("state = %s, want Processed", ctx.GetState())
+	}
+	if ctx.GetProcessedAt().IsZero() {
+		t.Error("processedAt should be set after CompleteTransfer")
+	}
+}
+
+func TestPurgeTransferDeletesFileThenTransfer(t *testing.T) {
+	client := &fakePutioClient{}
+	m := newTestManagerWithClient(client)
+
+	driveTransferToCleanup(t, m, 1, 100)
+
+	if err := m.PurgeTransfer(1); err != nil {
+		t.Fatalf("PurgeTransfer: %v", err)
+	}
 
 	client.mu.Lock()
 	defer client.mu.Unlock()
@@ -161,12 +200,17 @@ func TestCleanupHookDeletesFileThenTransfer(t *testing.T) {
 	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 1 {
 		t.Errorf("DeleteTransfer calls = %v, want [1]", client.deleteTransferCalls)
 	}
+	// Coordinator context should be dropped so the in-memory map doesn't
+	// grow unbounded across the process lifetime.
+	if _, ok := m.coordinator.GetTransferContext(1); ok {
+		t.Error("coordinator context should be dropped after PurgeTransfer")
+	}
 }
 
-func TestCleanupHookProceedsWhenFileAlreadyGone(t *testing.T) {
-	// Orphan-recovery path: file was deleted in a prior run. DeleteFile
-	// returns 404, but cleanup must still delete the transfer record —
-	// otherwise the orphan-poll loop persists.
+func TestPurgeTransferTolerates404OnDeleteFile(t *testing.T) {
+	// Orphan-recovery path: the file was already deleted on a previous run
+	// (or a container restart re-discovered the transfer post-cleanup).
+	// DeleteTransfer must still run.
 	client := &fakePutioClient{
 		deleteFileErr: notFoundError("delete file"),
 	}
@@ -174,50 +218,42 @@ func TestCleanupHookProceedsWhenFileAlreadyGone(t *testing.T) {
 
 	driveTransferToCleanup(t, m, 1, 100)
 
+	if err := m.PurgeTransfer(1); err != nil {
+		t.Fatalf("PurgeTransfer: %v", err)
+	}
+
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.deleteFileCalls) != 1 {
-		t.Errorf("expected DeleteFile to be attempted, got %d calls", len(client.deleteFileCalls))
-	}
 	if len(client.deleteTransferCalls) != 1 {
 		t.Errorf("expected DeleteTransfer to run despite file 404, got %d calls", len(client.deleteTransferCalls))
 	}
 }
 
-func TestCleanupHookSkipsTransferDeleteOnFileError(t *testing.T) {
-	// Non-404 DeleteFile failure (e.g. 500 from put.io). Skipping the
-	// transfer delete prevents leaving dangling files behind on quota.
+func TestPurgeTransferStopsOnNon404DeleteFileError(t *testing.T) {
+	// A real put.io 5xx: don't try DeleteTransfer (would orphan the file
+	// against quota). Surface the error so callers can log/retry.
 	client := &fakePutioClient{
 		deleteFileErr: errors.New("internal server error"),
 	}
 	m := newTestManagerWithClient(client)
 
-	m.coordinator.InitiateTransfer(1, "test-transfer", 100, 1)
-	if err := m.coordinator.StartDownload(1); err != nil {
-		t.Fatalf("StartDownload: %v", err)
-	}
-	if err := m.coordinator.FileCompleted(1); err != nil {
-		t.Fatalf("FileCompleted: %v", err)
-	}
-	// CompleteTransfer logs the hook error but doesn't propagate it; the
-	// state still advances to Processed.
-	if err := m.coordinator.CompleteTransfer(1); err != nil {
-		t.Fatalf("CompleteTransfer: %v", err)
+	driveTransferToCleanup(t, m, 1, 100)
+
+	err := m.PurgeTransfer(1)
+	if err == nil {
+		t.Fatal("PurgeTransfer should return error on non-404 DeleteFile failure")
 	}
 
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.deleteFileCalls) != 1 {
-		t.Errorf("expected one DeleteFile attempt, got %d", len(client.deleteFileCalls))
-	}
 	if len(client.deleteTransferCalls) != 0 {
-		t.Errorf("expected DeleteTransfer to be skipped when DeleteFile errors, got %d calls", len(client.deleteTransferCalls))
+		t.Errorf("DeleteTransfer must not run when DeleteFile errors; got %d calls", len(client.deleteTransferCalls))
 	}
 }
 
-func TestCleanupHookTolerates404OnDeleteTransfer(t *testing.T) {
-	// If the transfer was already removed (e.g. by the user via the put.io
-	// UI), a 404 on DeleteTransfer should be a clean no-op, not an error.
+func TestPurgeTransferTolerates404OnDeleteTransfer(t *testing.T) {
+	// If the transfer was already removed (e.g. via the put.io UI), a 404
+	// on DeleteTransfer is a clean no-op. Coordinator context still drops.
 	client := &fakePutioClient{
 		deleteTransferErr: notFoundError("cancel transfer"),
 	}
@@ -225,21 +261,51 @@ func TestCleanupHookTolerates404OnDeleteTransfer(t *testing.T) {
 
 	driveTransferToCleanup(t, m, 1, 100)
 
-	// State should still reach Processed despite the 404 on DeleteTransfer.
-	ctx, ok := m.coordinator.GetTransferContext(1)
-	if !ok {
-		t.Fatal("transfer context missing")
+	if err := m.PurgeTransfer(1); err != nil {
+		t.Fatalf("PurgeTransfer: %v", err)
 	}
-	if ctx.GetState() != TransferLifecycleProcessed {
-		t.Errorf("state = %s, want Processed", ctx.GetState())
+	if _, ok := m.coordinator.GetTransferContext(1); ok {
+		t.Error("coordinator context should be dropped despite 404")
 	}
 }
 
-func TestHandleTransferErrorOn404TriggersCleanup(t *testing.T) {
-	// The orphan-loop scenario: GetAllTransferFiles returns wrapped 404
-	// after a container restart re-discovers a transfer whose files
-	// plundrio already deleted. Cleanup must run so the next poll
-	// doesn't see this transfer again.
+func TestPurgeTransferSkipsDeleteFileWhenFileIDIsZero(t *testing.T) {
+	// Cascade-protection: DeleteFile(0) targets the put.io account root.
+	// Tests the protection that used to live in handleTorrentRemove (#25).
+	client := &fakePutioClient{}
+	m := newTestManagerWithClient(client)
+
+	// Construct a Processed context with FileID==0 directly — driveTransferToCleanup
+	// would set FileID=100. This mirrors the "seeding-only" zombie shape.
+	m.coordinator.InitiateTransfer(1, "zombie", 0, 1)
+	if err := m.coordinator.StartDownload(1); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	if err := m.coordinator.FileCompleted(1); err != nil {
+		t.Fatalf("FileCompleted: %v", err)
+	}
+	if err := m.coordinator.CompleteTransfer(1); err != nil {
+		t.Fatalf("CompleteTransfer: %v", err)
+	}
+
+	if err := m.PurgeTransfer(1); err != nil {
+		t.Fatalf("PurgeTransfer: %v", err)
+	}
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.deleteFileCalls) != 0 {
+		t.Errorf("DeleteFile must not be called when FileID is 0; got %v", client.deleteFileCalls)
+	}
+	if len(client.deleteTransferCalls) != 1 {
+		t.Errorf("DeleteTransfer should still run; got %d calls", len(client.deleteTransferCalls))
+	}
+}
+
+func TestHandleTransferErrorOn404PurgesOrphan(t *testing.T) {
+	// Orphan-loop scenario: GetAllTransferFiles returns wrapped 404 after
+	// a container restart re-discovers a transfer whose files plundrio
+	// already deleted. Purge must run so the next poll doesn't see it.
 	client := &fakePutioClient{}
 	m := newTestManagerWithClient(client)
 
@@ -251,7 +317,7 @@ func TestHandleTransferErrorOn404TriggersCleanup(t *testing.T) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 42 {
-		t.Errorf("DeleteTransfer calls = %v, want [42] (orphan must be cleaned up)", client.deleteTransferCalls)
+		t.Errorf("DeleteTransfer calls = %v, want [42] (orphan must be purged)", client.deleteTransferCalls)
 	}
 }
 
@@ -273,5 +339,59 @@ func TestHandleTransferErrorOnNon404DoesNotCleanup(t *testing.T) {
 	}
 	if len(client.deleteFileCalls) != 0 {
 		t.Errorf("expected no cleanup on non-404 error, got DeleteFile calls = %v", client.deleteFileCalls)
+	}
+}
+
+func TestPurgeStaleProcessedAgesOutCompleted(t *testing.T) {
+	// Retention janitor: a Processed transfer whose processedAt is older
+	// than retention gets PurgeTransfered unilaterally. Younger entries
+	// are skipped. Non-Processed states (Downloading, Failed) are skipped
+	// regardless of age.
+	client := &fakePutioClient{}
+	m := newTestManagerWithClient(client)
+
+	// Transfer 1: Processed, old (will purge)
+	driveTransferToCleanup(t, m, 1, 100)
+	oldCtx, _ := m.coordinator.GetTransferContext(1)
+	oldCtx.mu.Lock()
+	oldCtx.processedAt = oldCtx.processedAt.Add(-2 * time.Hour)
+	oldCtx.mu.Unlock()
+
+	// Transfer 2: Processed, recent (will be skipped)
+	driveTransferToCleanup(t, m, 2, 200)
+
+	// Transfer 3: Downloading (will be skipped — retention only fires on
+	// Processed, not arbitrary stuck states)
+	m.coordinator.InitiateTransfer(3, "downloading", 300, 5)
+	if err := m.coordinator.StartDownload(3); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+
+	m.purgeStaleProcessed(1*time.Hour, time.Now())
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 1 {
+		t.Errorf("DeleteTransfer calls = %v, want [1]", client.deleteTransferCalls)
+	}
+}
+
+func TestPurgeStaleProcessedDisabledByZero(t *testing.T) {
+	// retention <= 0 disables the janitor entirely (operator opt-out).
+	client := &fakePutioClient{}
+	m := newTestManagerWithClient(client)
+
+	driveTransferToCleanup(t, m, 1, 100)
+	oldCtx, _ := m.coordinator.GetTransferContext(1)
+	oldCtx.mu.Lock()
+	oldCtx.processedAt = oldCtx.processedAt.Add(-100 * time.Hour)
+	oldCtx.mu.Unlock()
+
+	m.purgeStaleProcessed(0, time.Now())
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.deleteTransferCalls) != 0 {
+		t.Errorf("zero retention must disable the janitor; got DeleteTransfer = %v", client.deleteTransferCalls)
 	}
 }

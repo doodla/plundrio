@@ -308,31 +308,19 @@ func (s *Server) handleTorrentRemove(ctx context.Context, args json.RawMessage) 
 			continue
 		}
 
-		// Seeding-only transfers (where the file was already deleted) have no
-		// file_id. Calling DeleteFile(0) would target the root folder and
-		// cascade-delete everything in the account.
-		if transfer.FileID == 0 {
-			log.Warn("rpc").
-				Str("operation", "torrent-remove").
-				Str("hash", hash).
-				Int64("transfer_id", transfer.ID).
-				Msg("Skipping file deletion: transfer has no associated file")
-		} else if err := s.client.DeleteFile(ctx, transfer.FileID); err != nil {
+		// Delegate the put.io-side delete to the download manager so the
+		// same code path runs here, in the retention janitor, and in the
+		// orphan-recovery branch of handleTransferError. PurgeTransfer
+		// also handles the FileID==0 cascade-delete-root protection from
+		// #25 and tolerates put.io 404 (transfer removed via the put.io
+		// UI in the meantime).
+		if err := s.dlService.PurgeTransfer(transfer.ID); err != nil {
 			log.Error("rpc").
 				Str("operation", "torrent-remove").
 				Str("hash", hash).
 				Int64("transfer_id", transfer.ID).
 				Err(err).
-				Msg("Failed to delete transfer files")
-		}
-
-		if err := s.client.DeleteTransfer(ctx, transfer.ID); err != nil {
-			log.Error("rpc").
-				Str("operation", "torrent-remove").
-				Str("hash", hash).
-				Int64("transfer_id", transfer.ID).
-				Err(err).
-				Msg("Failed to delete transfer")
+				Msg("Failed to purge transfer")
 		} else {
 			log.Info("rpc").
 				Str("operation", "torrent-remove").
@@ -342,7 +330,10 @@ func (s *Server) handleTorrentRemove(ctx context.Context, args json.RawMessage) 
 				Msg("Transfer removed")
 		}
 
-		// Delete local files if requested (closes #23)
+		// Delete local files if requested (closes #23). Kept here rather
+		// than inside PurgeTransfer because the janitor and orphan paths
+		// must never delete on-disk data — only an explicit user/client
+		// request should.
 		if params.DeleteLocalData {
 			category := s.dlService.GetCategory(hash)
 			localTargetDir := filepath.Join(s.cfg.TargetDir, category)

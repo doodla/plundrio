@@ -83,7 +83,14 @@ type TransferContext struct {
 	// the difference and wait forever for a transfer plundrio has already
 	// abandoned. Surfaced via IsPermanent() to the server package.
 	permanent bool
-	mu        sync.RWMutex
+	// processedAt is the wall-clock time at which CompleteTransfer
+	// transitioned this context to TransferLifecycleProcessed. Used by the
+	// retention janitor (transfers.go purgeStaleProcessed) to decide when a
+	// completed transfer has been visible-but-unremoved long enough that
+	// the *arr client probably isn't coming. Zero when state has never been
+	// Processed.
+	processedAt time.Time
+	mu          sync.RWMutex
 }
 
 // NewTransferContext creates a TransferContext for use in tests or cross-package setup.
@@ -170,4 +177,12 @@ func (tc *TransferContext) IsPermanent() bool {
 	p := tc.permanent
 	tc.mu.RUnlock()
 	return p
+}
+
+// GetProcessedAt returns the time at which this context transitioned to
+// TransferLifecycleProcessed, or the zero value if it never did.
+func (tc *TransferContext) GetProcessedAt() time.Time {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+	return tc.processedAt
 }

@@ -99,17 +99,19 @@ func (f *fakePutioClient) DeleteTransfer(ctx context.Context, transferID int64) 
 	return f.deleteTransferErr
 }
 
-// fakeDownloadService implements server.DownloadService — five methods plus
+// fakeDownloadService implements server.DownloadService — six methods plus
 // Stop, all backed by an in-memory map. The server package tests don't need
 // the real download.Manager wiring, just the surface the handlers touch.
 type fakeDownloadService struct {
-	mu             sync.Mutex
-	transfers      []*putio.Transfer
-	categories     map[string]string
-	transferCtxs   map[int64]*download.TransferContext
-	stopCalls      int
-	removedHashes  []string
-	setCategoryFns []struct{ hash, category string }
+	mu                 sync.Mutex
+	transfers          []*putio.Transfer
+	categories         map[string]string
+	transferCtxs       map[int64]*download.TransferContext
+	stopCalls          int
+	removedHashes      []string
+	setCategoryFns     []struct{ hash, category string }
+	purgeTransferCalls []int64
+	purgeTransferErr   error
 }
 
 func newFakeDownloadService() *fakeDownloadService {
@@ -150,6 +152,13 @@ func (f *fakeDownloadService) RemoveCategory(hash string) {
 	defer f.mu.Unlock()
 	delete(f.categories, hash)
 	f.removedHashes = append(f.removedHashes, hash)
+}
+
+func (f *fakeDownloadService) PurgeTransfer(transferID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.purgeTransferCalls = append(f.purgeTransferCalls, transferID)
+	return f.purgeTransferErr
 }
 
 func (f *fakeDownloadService) Stop() {
@@ -473,7 +482,13 @@ func TestHandleTorrentGetSurfacesPermanentFailure(t *testing.T) {
 	}
 }
 
-func TestHandleTorrentRemoveDeletesFileAndTransfer(t *testing.T) {
+func TestHandleTorrentRemoveDelegatesToPurgeTransfer(t *testing.T) {
+	// handleTorrentRemove no longer calls DeleteFile/DeleteTransfer
+	// directly; it routes the put.io-side delete through
+	// dlService.PurgeTransfer so the same code path runs whether removal
+	// is driven by an *arr client or by the retention janitor. The
+	// FileID==0 cascade-protection and the put.io 404 tolerance now live
+	// inside PurgeTransfer (covered by download package tests).
 	client := &fakePutioClient{
 		transfers: []*putio.Transfer{
 			{ID: 100, Hash: "abc", FileID: 999, Name: "movie"},
@@ -493,13 +508,11 @@ func TestHandleTorrentRemoveDeletesFileAndTransfer(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	if len(client.deleteFileCalls) != 1 || client.deleteFileCalls[0] != 999 {
-		t.Errorf("DeleteFile calls = %v, want [999]", client.deleteFileCalls)
-	}
-	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 100 {
-		t.Errorf("DeleteTransfer calls = %v, want [100]", client.deleteTransferCalls)
+	dl.mu.Lock()
+	purgeCalls := append([]int64(nil), dl.purgeTransferCalls...)
+	dl.mu.Unlock()
+	if len(purgeCalls) != 1 || purgeCalls[0] != 100 {
+		t.Errorf("PurgeTransfer calls = %v, want [100]", purgeCalls)
 	}
 	// Category mapping should be cleaned up via dlService.RemoveCategory.
 	if got := dl.GetCategory("abc"); got != "" {
@@ -538,10 +551,11 @@ func TestHandleTorrentRemoveWithDeleteLocalData(t *testing.T) {
 	}
 }
 
-func TestHandleTorrentRemoveSkipsDeleteFileWhenFileIDIsZero(t *testing.T) {
-	// Transfer that's already had its file deleted (typical of a
-	// post-cleanup transfer record kept around for *arr visibility).
-	// Calling DeleteFile(0) would target the put.io account root.
+func TestHandleTorrentRemoveStillPurgesWhenFileIDIsZero(t *testing.T) {
+	// The cascade-delete-root protection (DeleteFile(0) wipes the put.io
+	// account root) now lives inside Manager.PurgeTransfer rather than at
+	// the RPC boundary. The server's job is just to delegate; PurgeTransfer
+	// still gets called for FileID==0 transfers and decides what to do.
 	client := &fakePutioClient{
 		transfers: []*putio.Transfer{
 			{ID: 100, Hash: "abc", FileID: 0, Name: "movie"},
@@ -560,12 +574,10 @@ func TestHandleTorrentRemoveSkipsDeleteFileWhenFileIDIsZero(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	if len(client.deleteFileCalls) != 0 {
-		t.Errorf("DeleteFile must not be called when FileID is 0; got %v", client.deleteFileCalls)
-	}
-	if len(client.deleteTransferCalls) != 1 {
-		t.Errorf("DeleteTransfer should still run; got %d calls", len(client.deleteTransferCalls))
+	dl.mu.Lock()
+	purgeCalls := append([]int64(nil), dl.purgeTransferCalls...)
+	dl.mu.Unlock()
+	if len(purgeCalls) != 1 || purgeCalls[0] != 100 {
+		t.Errorf("PurgeTransfer calls = %v, want [100]", purgeCalls)
 	}
 }

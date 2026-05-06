@@ -81,6 +81,7 @@ var runCmd = &cobra.Command{
 		}
 		listenAddr := viper.GetString("listen")
 		workerCount := viper.GetInt("workers")
+		postCompleteRetention := viper.GetDuration("post_complete_retention")
 		downloadStartWindow := config.DownloadStartWindowConfig{
 			Enabled: viper.GetBool("download_start_window.enabled"),
 			Start:   viper.GetString("download_start_window.start"),
@@ -92,6 +93,7 @@ var runCmd = &cobra.Command{
 			Str("putio_folder", putioFolder).
 			Str("listen_addr", listenAddr).
 			Int("workers", workerCount).
+			Dur("post_complete_retention", postCompleteRetention).
 			Bool("download_start_window_enabled", downloadStartWindow.Enabled).
 			Str("download_start_window_start", downloadStartWindow.Start).
 			Str("download_start_window_end", downloadStartWindow.End).
@@ -125,12 +127,13 @@ var runCmd = &cobra.Command{
 
 		// Initialize configuration
 		cfg := &config.Config{
-			TargetDir:           targetDir,
-			PutioFolder:         putioFolder,
-			OAuthToken:          oauthToken,
-			ListenAddr:          listenAddr,
-			WorkerCount:         workerCount,
-			DownloadStartWindow: downloadStartWindow,
+			TargetDir:             targetDir,
+			PutioFolder:           putioFolder,
+			OAuthToken:            oauthToken,
+			ListenAddr:            listenAddr,
+			WorkerCount:           workerCount,
+			DownloadStartWindow:   downloadStartWindow,
+			PostCompleteRetention: postCompleteRetention,
 		}
 
 		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
@@ -214,6 +217,9 @@ folder: "plundrio"					# Folder name on Put.io
 token: "" 									# Get a token with get-token
 listen: ":9091"							# Transmission RPC server address
 workers: 4									# Number of download workers
+post_complete_retention: 24h # Grace before DeleteTransfer on put.io after local
+                             # download completes (window for *arr's torrent-remove);
+                             # 0 disables — rely on the client to remove.
 download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
@@ -222,6 +228,7 @@ log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
+# PLDR_POST_COMPLETE_RETENTION,
 # PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
 # PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
 `
@@ -324,6 +331,7 @@ func init() {
 	runCmd.Flags().StringP("token", "k", "", "Put.io OAuth token (required)")
 	runCmd.Flags().StringP("listen", "l", ":9091", "Listen address")
 	runCmd.Flags().IntP("workers", "w", 4, "Number of workers")
+	runCmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
 	runCmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
 
 	rootCmd.AddCommand(runCmd)

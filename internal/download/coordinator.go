@@ -3,6 +3,7 @@ package download
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/doodla/plundrio/internal/log"
 )
@@ -251,8 +252,12 @@ func (tc *TransferCoordinator) CompleteTransfer(transferID int64) error {
 		}
 	}
 
-	// Mark the transfer as processed instead of removing it
+	// Mark the transfer as processed instead of removing it. processedAt
+	// stamps the transition so the retention janitor can age the entry out
+	// if the *arr client never issues torrent-remove (see manager.go
+	// PurgeTransfer + transfers.go purgeStaleProcessed).
 	ctx.state = TransferLifecycleProcessed
+	ctx.processedAt = time.Now()
 
 	// Notify that the transfer has been processed
 	tc.onTransferProcessed(transferID)
@@ -378,6 +383,14 @@ func (tc *TransferCoordinator) FailTransfer(transferID int64, err error) error {
 		Msg("Transfer failed but keeping context for retry")
 
 	return nil
+}
+
+// DropTransfer removes a transfer's context from the coordinator's tracking
+// map. Called by Manager.PurgeTransfer after the put.io-side delete succeeds,
+// so the in-memory map doesn't grow unbounded across the process lifetime.
+// Idempotent: missing IDs are silently ignored.
+func (tc *TransferCoordinator) DropTransfer(transferID int64) {
+	tc.transfers.Delete(transferID)
 }
 
 // GetTransferContext safely retrieves a transfer context

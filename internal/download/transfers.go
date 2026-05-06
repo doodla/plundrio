@@ -137,6 +137,45 @@ func (m *Manager) monitorTransfers() {
 			return
 		case <-ticker.C:
 			m.processor.checkTransfers()
+			m.purgeStaleProcessed(m.cfg.PostCompleteRetention, time.Now())
+		}
+	}
+}
+
+// purgeStaleProcessed walks the coordinator's tracked transfers and purges any
+// in TransferLifecycleProcessed whose processedAt is older than retention.
+// Called from the monitor goroutine after every checkTransfers tick. Skipped
+// when retention <= 0 (operator opted out — only torrent-remove cleans up).
+//
+// Split out of monitorTransfers so the test can drive it deterministically
+// without spinning up the monitor ticker.
+func (m *Manager) purgeStaleProcessed(retention time.Duration, now time.Time) {
+	if retention <= 0 {
+		return
+	}
+	cutoff := now.Add(-retention)
+	var stale []int64
+	m.coordinator.RangeTransfers(func(id int64, ctx *TransferContext) bool {
+		if ctx.GetState() != TransferLifecycleProcessed {
+			return true
+		}
+		processedAt := ctx.GetProcessedAt()
+		if processedAt.IsZero() || processedAt.After(cutoff) {
+			return true
+		}
+		stale = append(stale, id)
+		return true
+	})
+	for _, id := range stale {
+		log.Info("purge").
+			Int64("transfer_id", id).
+			Dur("retention", retention).
+			Msg("Post-complete retention elapsed without torrent-remove; purging")
+		if err := m.PurgeTransfer(id); err != nil {
+			log.Error("purge").
+				Int64("transfer_id", id).
+				Err(err).
+				Msg("Retention purge failed")
 		}
 	}
 }
@@ -445,17 +484,24 @@ func (p *TransferProcessor) processTransfer(transfer *putio.Transfer) {
 // A 404 here means we re-discovered a transfer whose files plundrio already
 // deleted (typically across a container restart). Without this branch the
 // transfer would loop on every poll: GetAllTransferFiles → 404 → log → repeat.
-// We treat it as the orphan-recovery path and run the cleanup hook to delete
-// the dead transfer record.
+// We treat it as the orphan-recovery path and call PurgeTransfer to drop the
+// dead transfer record on put.io. Note this path bypasses the
+// PostCompleteRetention grace period — there's no local file to import and no
+// reason to keep the transfer visible to *arr.
 func (p *TransferProcessor) handleTransferError(transfer *putio.Transfer, err error) {
 	if isNotFoundError(err) {
 		log.Info("transfers").
 			Str("name", transfer.Name).
 			Int64("id", transfer.ID).
-			Msg("Files no longer exist on Put.io, cleaning up orphan transfer")
+			Msg("Files no longer exist on Put.io, purging orphan transfer")
 
-		p.initializeTransfer(transfer, 0)
-		p.manager.cleanupTransfer(transfer.ID)
+		if err := p.manager.PurgeTransfer(transfer.ID); err != nil {
+			log.Error("transfers").
+				Str("name", transfer.Name).
+				Int64("id", transfer.ID).
+				Err(err).
+				Msg("Failed to purge orphan transfer")
+		}
 		return
 	}
 

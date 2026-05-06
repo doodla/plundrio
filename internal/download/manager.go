@@ -112,64 +112,17 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		m.processor.MarkTransferProcessed(transferID)
 	})
 
-	// Register cleanup hooks.
+	// CompleteTransfer no longer deletes the put.io transfer/file. Doing so
+	// the moment local download finished violated *arr's Transmission contract:
+	// Sonarr/Radarr's TrackedDownloadService treats a torrent that vanishes
+	// from torrent-get (without first being observed in a Completed state long
+	// enough to import) as "user removed it" — sets IsTrackable=false, no
+	// import, no DownloadFailedEvent. Plundrio's same-tick cleanup beat
+	// Radarr's 60s poll deterministically. The put.io delete now waits for
+	// either an explicit torrent-remove RPC (handled in server/torrent.go
+	// against Manager.PurgeTransfer) or the retention janitor in
+	// transfers.go purgeStaleProcessed. Hook below is local-only state.
 	//
-	// After local download completes (or when we discover an orphan transfer
-	// whose files are already gone), delete both the put.io file and the
-	// transfer record. Keeping the transfer record around — as upstream did —
-	// causes an orphan-poll loop after a container restart: the transfer
-	// reappears in GetTransfers as COMPLETED/SEEDING, plundrio tries to fetch
-	// its files, gets 404, and loops every TransferCheckInterval. The file is
-	// already deleted, so put.io can't seed it anyway; the transfer record is
-	// dead weight either way.
-	m.coordinator.RegisterCleanupHook(func(transferID int64) error {
-		state, ok := m.coordinator.GetTransferContext(transferID)
-		if !ok {
-			return NewTransferNotFoundError(transferID)
-		}
-
-		if err := m.client.DeleteFile(m.Context(), state.FileID); err != nil {
-			if isNotFoundError(err) {
-				// Orphan-recovery path: the file was already deleted on a
-				// previous run. Proceed to transfer cleanup anyway.
-				log.Debug("cleanup").
-					Int64("transfer_id", transferID).
-					Int64("file_id", state.FileID).
-					Msg("Source file already gone")
-			} else {
-				log.Error("cleanup").
-					Int64("transfer_id", transferID).
-					Int64("file_id", state.FileID).
-					Err(err).
-					Msg("Failed to delete source file")
-				return err
-			}
-		} else {
-			log.Info("cleanup").
-				Int64("transfer_id", transferID).
-				Msg("Deleted source file")
-		}
-
-		if err := m.client.DeleteTransfer(m.Context(), transferID); err != nil {
-			if isNotFoundError(err) {
-				log.Debug("cleanup").
-					Int64("transfer_id", transferID).
-					Msg("Transfer already gone")
-				return nil
-			}
-			log.Error("cleanup").
-				Int64("transfer_id", transferID).
-				Err(err).
-				Msg("Failed to delete transfer")
-			return err
-		}
-
-		log.Info("cleanup").
-			Int64("transfer_id", transferID).
-			Msg("Deleted transfer")
-		return nil
-	})
-
 	// Drop any localRetryState for this transfer once it's processed
 	// successfully. Without this, processFailedTransfers leaks an entry per
 	// retried transfer for the lifetime of the process. Lookup-only callers
@@ -181,6 +134,82 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 	})
 
 	return m
+}
+
+// PurgeTransfer deletes the transfer's put.io record (file + transfer) and
+// drops the in-memory tracking state. This is the "actually remove from put.io"
+// path, called from:
+//
+//   - server/torrent.go handleTorrentRemove, when the *arr client issues a
+//     torrent-remove RPC after a successful import.
+//   - transfers.go purgeStaleProcessed, when PostCompleteRetention has elapsed
+//     without a torrent-remove arriving (safety net).
+//   - transfers.go handleTransferError, on the orphan-recovery 404 path
+//     (transfer rediscovered post-restart whose put.io files are gone).
+//
+// Tolerates both put.io-side NotFound (someone already deleted via the put.io
+// UI, or the orphan path) and a missing in-memory context (the transfer came
+// from a put.io snapshot but never went through CompleteTransfer locally —
+// e.g. a manually-removed transfer). FileID == 0 skips DeleteFile to avoid
+// the cascade-delete-root bug fixed in #25.
+func (m *Manager) PurgeTransfer(transferID int64) error {
+	fileID := int64(0)
+	if ctx, ok := m.coordinator.GetTransferContext(transferID); ok {
+		fileID = ctx.FileID
+	} else {
+		// Fall back to the put.io snapshot for the file_id. Covers
+		// torrent-remove on a transfer plundrio hasn't initialized
+		// locally yet (rare: snapshot has it, coordinator doesn't).
+		for _, t := range m.processor.GetTransfers() {
+			if t.ID == transferID {
+				fileID = t.FileID
+				break
+			}
+		}
+	}
+
+	if fileID != 0 {
+		if err := m.client.DeleteFile(m.Context(), fileID); err != nil {
+			if isNotFoundError(err) {
+				log.Debug("purge").
+					Int64("transfer_id", transferID).
+					Int64("file_id", fileID).
+					Msg("Source file already gone")
+			} else {
+				log.Error("purge").
+					Int64("transfer_id", transferID).
+					Int64("file_id", fileID).
+					Err(err).
+					Msg("Failed to delete source file")
+				return err
+			}
+		} else {
+			log.Info("purge").
+				Int64("transfer_id", transferID).
+				Msg("Deleted source file")
+		}
+	}
+
+	if err := m.client.DeleteTransfer(m.Context(), transferID); err != nil {
+		if isNotFoundError(err) {
+			log.Debug("purge").
+				Int64("transfer_id", transferID).
+				Msg("Transfer already gone on put.io")
+		} else {
+			log.Error("purge").
+				Int64("transfer_id", transferID).
+				Err(err).
+				Msg("Failed to delete transfer")
+			return err
+		}
+	} else {
+		log.Info("purge").
+			Int64("transfer_id", transferID).
+			Msg("Deleted transfer")
+	}
+
+	m.coordinator.DropTransfer(transferID)
+	return nil
 }
 
 // Start begins monitoring transfers and downloading completed ones
