@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/doodla/go-putio"
+	"github.com/doodla/plundrio/internal/api"
 )
 
 // driveTransferToFailed runs a transfer through Initiate -> StartDownload ->
@@ -73,10 +74,17 @@ func makePutioFile(id int64, size int64) *putio.File {
 	}
 }
 
+// makeTransferFile wraps makePutioFile with a top-level relPath so test
+// fakes can return the new []api.TransferFile shape without ceremony.
+func makeTransferFile(id int64, size int64) api.TransferFile {
+	f := makePutioFile(id, size)
+	return api.TransferFile{File: f, RelPath: f.Name}
+}
+
 func TestProcessFailedTransfersRequeuesImmediatelyOnFirstFailure(t *testing.T) {
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			return []*putio.File{makePutioFile(1, 100)}, nil
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return []api.TransferFile{makeTransferFile(1, 100)}, nil
 		},
 	}
 	m := newTestManagerWithClient(client)
@@ -104,8 +112,8 @@ func TestProcessFailedTransfersRequeuesImmediatelyOnFirstFailure(t *testing.T) {
 
 func TestProcessFailedTransfersRespectsBackoff(t *testing.T) {
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			return []*putio.File{makePutioFile(1, 100)}, nil
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return []api.TransferFile{makeTransferFile(1, 100)}, nil
 		},
 	}
 	m := newTestManagerWithClient(client)
@@ -280,8 +288,8 @@ func TestProcessFailedTransfersPermanentFailWhenPutioStuck(t *testing.T) {
 
 func TestProcessFailedTransfersRequeueAfterPutioRecovery(t *testing.T) {
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			return []*putio.File{makePutioFile(1, 100)}, nil
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return []api.TransferFile{makeTransferFile(1, 100)}, nil
 		},
 	}
 	m := newTestManagerWithClient(client)
@@ -352,7 +360,7 @@ func TestProcessFailedTransfersPermanentSkipped(t *testing.T) {
 	// flags it). Assert after workerWg.Wait().
 	var getFilesCalls, retryCalls atomic.Int32
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
 			getFilesCalls.Add(1)
 			return nil, nil
 		},
@@ -410,7 +418,7 @@ func TestProcessFailedTransfersIgnoresNonFailedStates(t *testing.T) {
 	// instead of t.Errorf'ing inside the fake.
 	var getFilesCalls atomic.Int32
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
 			getFilesCalls.Add(1)
 			return nil, nil
 		},
@@ -516,13 +524,13 @@ func TestProcessFailedTransfersDoesNotTriggerCleanupForOnDiskFiles(t *testing.T)
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	files := []*putio.File{
-		{ID: 101, Name: fileAName, Size: fileASize},
-		{ID: 102, Name: "file-b.bin", Size: 200},
-		{ID: 103, Name: "file-c.bin", Size: 300},
+	files := []api.TransferFile{
+		{File: &putio.File{ID: 101, Name: fileAName, Size: fileASize}, RelPath: fileAName},
+		{File: &putio.File{ID: 102, Name: "file-b.bin", Size: 200}, RelPath: "file-b.bin"},
+		{File: &putio.File{ID: 103, Name: "file-c.bin", Size: 300}, RelPath: "file-c.bin"},
 	}
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
 			return files, nil
 		},
 	}
@@ -611,8 +619,8 @@ func TestProcessFailedTransfersClearsRetryStateOnSuccess(t *testing.T) {
 	}
 
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
-			return []*putio.File{{ID: 200, Name: fileName, Size: fileSize}}, nil
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return []api.TransferFile{{File: &putio.File{ID: 200, Name: fileName, Size: fileSize}, RelPath: fileName}}, nil
 		},
 	}
 	m := newTestManagerWithClientAndTargetDir(client, targetDir)
@@ -647,12 +655,12 @@ func TestProcessFailedTransfersClearsRetryStateOnSuccess(t *testing.T) {
 func TestProcessFailedTransfersStaysFailedOnGetFilesError(t *testing.T) {
 	var callCount int
 	client := &fakePutioClient{
-		getAllTransferFilesFn: func(fileID int64) ([]*putio.File, error) {
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
 			callCount++
 			if callCount == 1 {
 				return nil, errors.New("put.io 503")
 			}
-			return []*putio.File{makePutioFile(1, 100)}, nil
+			return []api.TransferFile{makeTransferFile(1, 100)}, nil
 		},
 	}
 	m := newTestManagerWithClient(client)
@@ -911,5 +919,133 @@ func TestProcessErroredTransfersDeleteFailureKeepsCounter(t *testing.T) {
 	}
 	if v, ok := m.processor.retryAttempts.Load(int64(1)); !ok || v.(int) != 3 {
 		t.Errorf("retryAttempts = %v (loaded=%v), want 3 (counter must persist across failed delete)", v, ok)
+	}
+}
+
+// drainQueuedJobs reads everything currently buffered in m.jobs without
+// blocking once the buffer is empty. queueTransferFiles uses QueueDownload
+// which is non-blocking via the buffered channel; for the path-shape tests
+// no worker has been started, so a non-blocking drain is correct.
+func drainQueuedJobs(m *Manager) []downloadJob {
+	out := make([]downloadJob, 0)
+	for {
+		select {
+		case j := <-m.jobs:
+			out = append(out, j)
+		default:
+			return out
+		}
+	}
+}
+
+// TestQueueTransferFilesPreservesRelativePathOnCollidingBasenames is the
+// regression for the bug observed on transfer 105269882 (Reborn.Rich.S01,
+// 2026-05-06). Per-episode subtitle subdirectories on put.io's side each
+// contained "2_English.srt"; before the fix, GetAllTransferFiles flattened
+// the tree and collapsed every leaf to the same local path, so all but the
+// first download landed in grab's validateLocal with ErrBadLength and the
+// transfer never completed.
+func TestQueueTransferFilesPreservesRelativePathOnCollidingBasenames(t *testing.T) {
+	targetDir := t.TempDir()
+	transferName := "Reborn.Rich.S01"
+
+	files := []api.TransferFile{
+		{File: &putio.File{ID: 101, Name: "2_English.srt", Size: 100}, RelPath: "S01E01/2_English.srt"},
+		{File: &putio.File{ID: 102, Name: "2_English.srt", Size: 200}, RelPath: "S01E02/2_English.srt"},
+	}
+	client := &fakePutioClient{
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return files, nil
+		},
+	}
+	m := newTestManagerWithClientAndTargetDir(client, targetDir)
+
+	transfer := &putio.Transfer{ID: 1, Name: transferName, FileID: 999, Status: "COMPLETED"}
+	m.coordinator.InitiateTransfer(transfer.ID, transfer.Name, transfer.FileID, len(files))
+	if err := m.coordinator.StartDownload(transfer.ID); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+
+	queued := m.processor.queueTransferFiles(transfer, files)
+	if queued != 2 {
+		t.Fatalf("queueTransferFiles returned %d, want 2", queued)
+	}
+
+	jobs := drainQueuedJobs(m)
+	if len(jobs) != 2 {
+		t.Fatalf("queued jobs = %d, want 2", len(jobs))
+	}
+
+	// Each FileID must map to a distinct, properly-prefixed local target.
+	want := map[int64]string{
+		101: filepath.Join(transferName, "S01E01", "2_English.srt"),
+		102: filepath.Join(transferName, "S01E02", "2_English.srt"),
+	}
+	got := map[int64]string{}
+	for _, j := range jobs {
+		got[j.FileID] = j.Name
+	}
+	for fileID, expected := range want {
+		if got[fileID] != expected {
+			t.Errorf("FileID %d -> Name %q, want %q", fileID, got[fileID], expected)
+		}
+	}
+
+	if got[101] == got[102] {
+		t.Errorf("path collision: both FileIDs mapped to %q", got[101])
+	}
+}
+
+// TestQueueTransferFilesCreatesNestedSubdirs verifies that a file whose put.io
+// path lives under a subfolder lands at the corresponding nested local target.
+// Subdirectory creation itself happens lazily inside the worker's downloadFile
+// (os.MkdirAll on filepath.Dir(targetPath)); we mirror that here to confirm
+// the joined path is well-formed and a subsequent MkdirAll succeeds.
+func TestQueueTransferFilesCreatesNestedSubdirs(t *testing.T) {
+	targetDir := t.TempDir()
+	transferName := "show-with-subs"
+
+	files := []api.TransferFile{
+		{File: &putio.File{ID: 201, Name: "foo.srt", Size: 100}, RelPath: "Subs/foo.srt"},
+	}
+	client := &fakePutioClient{
+		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {
+			return files, nil
+		},
+	}
+	m := newTestManagerWithClientAndTargetDir(client, targetDir)
+
+	transfer := &putio.Transfer{ID: 1, Name: transferName, FileID: 999, Status: "COMPLETED"}
+	m.coordinator.InitiateTransfer(transfer.ID, transfer.Name, transfer.FileID, len(files))
+	if err := m.coordinator.StartDownload(transfer.ID); err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+
+	if queued := m.processor.queueTransferFiles(transfer, files); queued != 1 {
+		t.Fatalf("queueTransferFiles returned %d, want 1", queued)
+	}
+
+	jobs := drainQueuedJobs(m)
+	if len(jobs) != 1 {
+		t.Fatalf("queued jobs = %d, want 1", len(jobs))
+	}
+	wantName := filepath.Join(transferName, "Subs", "foo.srt")
+	if jobs[0].Name != wantName {
+		t.Errorf("job.Name = %q, want %q", jobs[0].Name, wantName)
+	}
+
+	// Compute the absolute target path the way downloadFile does, then run
+	// the same MkdirAll. The Subs/ subdirectory must come into being.
+	targetPath := filepath.Join(targetDir, jobs[0].Name)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll for nested target failed: %v", err)
+	}
+	subDir := filepath.Join(targetDir, transferName, "Subs")
+	info, err := os.Stat(subDir)
+	if err != nil {
+		t.Fatalf("Stat nested subdir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("%s is not a directory", subDir)
 	}
 }

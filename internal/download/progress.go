@@ -15,6 +15,7 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 	go func() {
 		log.Info("download").
 			Str("file_name", state.Name).
+			Int64("file_id", state.FileID).
 			Float64("size_mb", float64(fileSize)/1024/1024).
 			Msg("Starting download")
 
@@ -66,6 +67,7 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 
 						log.Debug("download").
 							Str("file_name", state.Name).
+							Int64("file_id", state.FileID).
 							Int64("transfer_id", state.TransferID).
 							Int64("bytes_delta", bytesDelta).
 							Int64("transfer_downloaded", downloadedSize).
@@ -75,6 +77,7 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 
 					log.Info("download").
 						Str("file_name", state.Name).
+						Int64("file_id", state.FileID).
 						Float64("progress_percent", progress).
 						Float64("downloaded_mb", downloadedMB).
 						Float64("total_mb", totalMB).

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/doodla/go-putio"
+	"github.com/doodla/plundrio/internal/api"
 	"github.com/doodla/plundrio/internal/log"
 )
 
@@ -513,7 +514,7 @@ func (p *TransferProcessor) handleTransferError(transfer *putio.Transfer, err er
 }
 
 // queueTransferFiles processes files in a transfer and queues them for download
-func (p *TransferProcessor) queueTransferFiles(transfer *putio.Transfer, files []*putio.File) int {
+func (p *TransferProcessor) queueTransferFiles(transfer *putio.Transfer, files []api.TransferFile) int {
 	filesToDownload := 0
 
 	// Get the transfer context to update total size
@@ -527,8 +528,8 @@ func (p *TransferProcessor) queueTransferFiles(transfer *putio.Transfer, files [
 
 	// Calculate total size of all files
 	var totalSize int64
-	for _, file := range files {
-		totalSize += file.Size
+	for _, tf := range files {
+		totalSize += tf.File.Size
 	}
 
 	// Update the transfer context with total size
@@ -540,53 +541,58 @@ func (p *TransferProcessor) queueTransferFiles(transfer *putio.Transfer, files [
 		Int("file_count", len(files)).
 		Msg("Updated transfer with total file size")
 
-	for _, file := range files {
-		if p.shouldDownloadFile(transfer, file) {
+	for _, tf := range files {
+		if p.shouldDownloadFile(transfer, tf) {
 			filesToDownload++
-			p.queueFileDownload(transfer, file)
+			p.queueFileDownload(transfer, tf)
 		} else {
 			// For files we don't need to download (already exist), mark as completed
 			if err := p.manager.coordinator.FileCompleted(transfer.ID); err != nil {
 				log.Error("transfers").
 					Int64("transfer_id", transfer.ID).
-					Str("file_name", file.Name).
+					Str("file_name", tf.File.Name).
+					Int64("file_id", tf.File.ID).
 					Err(err).
 					Msg("Failed to mark existing file as completed")
 			}
 
 			// For existing files, add their size to the downloaded size
-			ctx.AddDownloadedBytes(file.Size)
+			ctx.AddDownloadedBytes(tf.File.Size)
 
 			log.Debug("transfers").
 				Int64("transfer_id", transfer.ID).
-				Str("file_name", file.Name).
-				Int64("file_size", file.Size).
+				Str("file_name", tf.File.Name).
+				Int64("file_id", tf.File.ID).
+				Int64("file_size", tf.File.Size).
 				Msg("Added existing file size to downloaded total")
 		}
 	}
 	return filesToDownload
 }
 
-// shouldDownloadFile determines if a file needs to be downloaded
-func (p *TransferProcessor) shouldDownloadFile(transfer *putio.Transfer, file *putio.File) bool {
+// shouldDownloadFile determines if a file needs to be downloaded.
+// The relPath carries any subdirectory context from the put.io transfer so
+// distinct files with the same basename map to distinct local targets.
+func (p *TransferProcessor) shouldDownloadFile(transfer *putio.Transfer, tf api.TransferFile) bool {
 	category := p.manager.GetCategory(transfer.Hash)
-	targetPath := filepath.Join(p.targetDir, category, transfer.Name, file.Name)
+	targetPath := filepath.Join(p.targetDir, category, transfer.Name, filepath.FromSlash(tf.RelPath))
 	info, err := os.Stat(targetPath)
 
 	// Skip if file exists with correct size
-	if err == nil && info.Size() == file.Size {
+	if err == nil && info.Size() == tf.File.Size {
 		log.Info("transfers").
-			Str("file_name", file.Name).
-			Int64("file_id", file.ID).
+			Str("file_name", tf.File.Name).
+			Int64("file_id", tf.File.ID).
+			Str("rel_path", tf.RelPath).
 			Msg("File already exists, skipping download")
 		return false
 	}
 
 	// Skip if already being downloaded
-	if _, exists := p.manager.activeFiles.Load(file.ID); exists {
+	if _, exists := p.manager.activeFiles.Load(tf.File.ID); exists {
 		log.Debug("transfers").
-			Str("file_name", file.Name).
-			Int64("file_id", file.ID).
+			Str("file_name", tf.File.Name).
+			Int64("file_id", tf.File.ID).
 			Msg("File already being downloaded")
 		return false
 	}
@@ -595,17 +601,18 @@ func (p *TransferProcessor) shouldDownloadFile(transfer *putio.Transfer, file *p
 }
 
 // queueFileDownload adds a file to the download queue
-func (p *TransferProcessor) queueFileDownload(transfer *putio.Transfer, file *putio.File) {
+func (p *TransferProcessor) queueFileDownload(transfer *putio.Transfer, tf api.TransferFile) {
 	category := p.manager.GetCategory(transfer.Hash)
 	p.manager.QueueDownload(downloadJob{
-		FileID:     file.ID,
-		Name:       filepath.Join(category, transfer.Name, file.Name),
+		FileID:     tf.File.ID,
+		Name:       filepath.Join(category, transfer.Name, filepath.FromSlash(tf.RelPath)),
 		TransferID: transfer.ID,
 	})
 	log.Debug("transfers").
-		Str("file_name", file.Name).
-		Int64("file_id", file.ID).
-		Int64("size", file.Size).
+		Str("file_name", tf.File.Name).
+		Int64("file_id", tf.File.ID).
+		Str("rel_path", tf.RelPath).
+		Int64("size", tf.File.Size).
 		Msg("Queued file for download")
 }
 

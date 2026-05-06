@@ -4,10 +4,21 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/doodla/go-putio"
 	"golang.org/x/oauth2"
 )
+
+// TransferFile is a leaf file inside a put.io transfer paired with the
+// forward-slash relative path from the transfer root. The path-collision fix
+// (v0.10.12) requires preserving subdirectory context so two leaves with the
+// same basename (per-episode subtitle dirs each containing 2_English.srt)
+// don't collapse to the same local target.
+type TransferFile struct {
+	File    *putio.File
+	RelPath string
+}
 
 // Client wraps the official Put.io client
 type Client struct {
@@ -155,42 +166,47 @@ func (c *Client) UploadFile(ctx context.Context, data []byte, filename string, f
 	return "", nil
 }
 
-// GetAllTransferFiles recursively gets all files in a transfer
-func (c *Client) GetAllTransferFiles(ctx context.Context, fileID int64) ([]*putio.File, error) {
-	// First check if the fileID is a file itself
+// GetAllTransferFiles recursively walks the transfer's directory tree and
+// returns every leaf file paired with its forward-slash relative path from the
+// transfer root. The relPath excludes the transfer-root folder itself
+// (callers join with transfer.Name when building the local target). For a
+// leaf at the top level, relPath is just the file's name; for a leaf inside
+// Subs/, relPath is "Subs/<name>".
+func (c *Client) GetAllTransferFiles(ctx context.Context, fileID int64) ([]TransferFile, error) {
 	file, err := c.client.Files.Get(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("get transfer files: %w", err)
 	}
 
-	// If it's a single file, return it directly
 	if !file.IsDir() {
-		return []*putio.File{&file}, nil
+		return []TransferFile{{File: &file, RelPath: file.Name}}, nil
 	}
 
-	// Otherwise, recursively get all files in the directory
-	var allFiles []*putio.File
-	var getFiles func(id int64) error
+	var allFiles []TransferFile
+	var walk func(id int64, prefix string) error
 
-	getFiles = func(id int64) error {
+	walk = func(id int64, prefix string) error {
 		files, err := c.GetFiles(ctx, id)
 		if err != nil {
 			return err
 		}
-
-		for _, file := range files {
-			if file.IsDir() {
-				if err := getFiles(file.ID); err != nil {
+		for _, f := range files {
+			rel := f.Name
+			if prefix != "" {
+				rel = path.Join(prefix, f.Name)
+			}
+			if f.IsDir() {
+				if err := walk(f.ID, rel); err != nil {
 					return err
 				}
-			} else {
-				allFiles = append(allFiles, file)
+				continue
 			}
+			allFiles = append(allFiles, TransferFile{File: f, RelPath: rel})
 		}
 		return nil
 	}
 
-	if err := getFiles(fileID); err != nil {
+	if err := walk(fileID, ""); err != nil {
 		return nil, err
 	}
 

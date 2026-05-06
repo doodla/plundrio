@@ -37,6 +37,7 @@ func (m *Manager) downloadWorker() {
 				if downloadErr, ok := err.(*DownloadError); ok && downloadErr.Type == "DownloadCancelled" {
 					log.Info("download").
 						Str("file_name", job.Name).
+						Int64("file_id", job.FileID).
 						Msg("Download cancelled due to shutdown")
 					// Just remove from active files for cancelled downloads
 					m.activeFiles.Delete(job.FileID)
@@ -46,6 +47,7 @@ func (m *Manager) downloadWorker() {
 				// Handle permanent failures
 				log.Error("download").
 					Str("file_name", job.Name).
+					Int64("file_id", job.FileID).
 					Err(err).
 					Msg("Failed to download file")
 
@@ -83,6 +85,7 @@ func (m *Manager) downloadWithRetry(state *DownloadState) error {
 			}
 			log.Warn("download").
 				Str("file_name", state.Name).
+				Int64("file_id", state.FileID).
 				Int("attempt", attempt).
 				Err(err).
 				Msg("Retrying download after error")
@@ -182,6 +185,7 @@ func (m *Manager) downloadFile(state *DownloadState) error {
 	// Start the download
 	log.Info("download").
 		Str("file_name", state.Name).
+		Int64("file_id", state.FileID).
 		Str("target_path", targetPath).
 		Msg("Starting download with grab")
 
@@ -250,6 +254,7 @@ func (m *Manager) downloadFile(state *DownloadState) error {
 
 		log.Info("download").
 			Str("file_name", state.Name).
+			Int64("file_id", state.FileID).
 			Float64("size_mb", float64(totalSize)/1024/1024).
 			Float64("speed_mbps", averageSpeedMBps).
 			Dur("duration", time.Since(state.StartTime)).

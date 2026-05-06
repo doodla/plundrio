@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/doodla/go-putio"
+	"github.com/doodla/plundrio/internal/api"
 	"github.com/doodla/plundrio/internal/config"
 	"github.com/doodla/plundrio/internal/log"
 )
@@ -12,7 +13,7 @@ import (
 // PutioClient abstracts the put.io API methods used by the download manager.
 type PutioClient interface {
 	GetTransfers(ctx context.Context) ([]*putio.Transfer, error)
-	GetAllTransferFiles(ctx context.Context, fileID int64) ([]*putio.File, error)
+	GetAllTransferFiles(ctx context.Context, fileID int64) ([]api.TransferFile, error)
 	RetryTransfer(ctx context.Context, transferID int64) (*putio.Transfer, error)
 	DeleteTransfer(ctx context.Context, transferID int64) error
 	DeleteFile(ctx context.Context, fileID int64) error

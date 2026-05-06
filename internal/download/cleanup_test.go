@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/doodla/go-putio"
+	"github.com/doodla/plundrio/internal/api"
 	"github.com/doodla/plundrio/internal/config"
 )
 
@@ -28,7 +29,7 @@ type fakePutioClient struct {
 
 	// Optional programmable hooks for tests that need richer behavior
 	// (transfers_test.go uses these to drive the failed-retry cascade).
-	getAllTransferFilesFn func(fileID int64) ([]*putio.File, error)
+	getAllTransferFilesFn func(fileID int64) ([]api.TransferFile, error)
 	retryTransferFn       func(transferID int64) (*putio.Transfer, error)
 	getTransfersFn        func() ([]*putio.Transfer, error)
 }
@@ -42,7 +43,7 @@ func (f *fakePutioClient) GetTransfers(ctx context.Context) ([]*putio.Transfer, 
 	}
 	return nil, nil
 }
-func (f *fakePutioClient) GetAllTransferFiles(ctx context.Context, fileID int64) ([]*putio.File, error) {
+func (f *fakePutioClient) GetAllTransferFiles(ctx context.Context, fileID int64) ([]api.TransferFile, error) {
 	if f.getAllTransferFilesFn != nil {
 		return f.getAllTransferFilesFn(fileID)
 	}
