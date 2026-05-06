@@ -353,9 +353,7 @@ func TestPurgeStaleProcessedAgesOutCompleted(t *testing.T) {
 	// Transfer 1: Processed, old (will purge)
 	driveTransferToCleanup(t, m, 1, 100)
 	oldCtx, _ := m.coordinator.GetTransferContext(1)
-	oldCtx.mu.Lock()
-	oldCtx.processedAt = oldCtx.processedAt.Add(-2 * time.Hour)
-	oldCtx.mu.Unlock()
+	oldCtx.SetProcessedAtForTest(oldCtx.GetProcessedAt().Add(-2 * time.Hour))
 
 	// Transfer 2: Processed, recent (will be skipped)
 	driveTransferToCleanup(t, m, 2, 200)
@@ -383,9 +381,7 @@ func TestPurgeStaleProcessedDisabledByZero(t *testing.T) {
 
 	driveTransferToCleanup(t, m, 1, 100)
 	oldCtx, _ := m.coordinator.GetTransferContext(1)
-	oldCtx.mu.Lock()
-	oldCtx.processedAt = oldCtx.processedAt.Add(-100 * time.Hour)
-	oldCtx.mu.Unlock()
+	oldCtx.SetProcessedAtForTest(oldCtx.GetProcessedAt().Add(-100 * time.Hour))
 
 	m.purgeStaleProcessed(0, time.Now())
 

@@ -112,22 +112,11 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		m.processor.MarkTransferProcessed(transferID)
 	})
 
-	// CompleteTransfer no longer deletes the put.io transfer/file. Doing so
-	// the moment local download finished violated *arr's Transmission contract:
-	// Sonarr/Radarr's TrackedDownloadService treats a torrent that vanishes
-	// from torrent-get (without first being observed in a Completed state long
-	// enough to import) as "user removed it" — sets IsTrackable=false, no
-	// import, no DownloadFailedEvent. Plundrio's same-tick cleanup beat
-	// Radarr's 60s poll deterministically. The put.io delete now waits for
-	// either an explicit torrent-remove RPC (handled in server/torrent.go
-	// against Manager.PurgeTransfer) or the retention janitor in
-	// transfers.go purgeStaleProcessed. Hook below is local-only state.
-	//
-	// Drop any localRetryState for this transfer once it's processed
-	// successfully. Without this, processFailedTransfers leaks an entry per
-	// retried transfer for the lifetime of the process. Lookup-only callers
-	// (Permanent check, etc.) tolerate the absence — LoadOrStore re-creates
-	// a zero-value state if needed.
+	// Drop any localRetryState entry once the transfer is processed.
+	// processFailedTransfers writes one entry per retried transfer; without
+	// the cleanup, the map leaks entries for the lifetime of the process.
+	// Lookup-only callers (Permanent check, etc.) tolerate the absence —
+	// LoadOrStore re-creates a zero-value state if needed.
 	m.coordinator.RegisterCleanupHook(func(transferID int64) error {
 		m.processor.failedRetryStates.Delete(transferID)
 		return nil
@@ -137,21 +126,29 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 }
 
 // PurgeTransfer deletes the transfer's put.io record (file + transfer) and
-// drops the in-memory tracking state. This is the "actually remove from put.io"
-// path, called from:
+// drops the in-memory tracking state.
 //
-//   - server/torrent.go handleTorrentRemove, when the *arr client issues a
-//     torrent-remove RPC after a successful import.
-//   - transfers.go purgeStaleProcessed, when PostCompleteRetention has elapsed
-//     without a torrent-remove arriving (safety net).
-//   - transfers.go handleTransferError, on the orphan-recovery 404 path
-//     (transfer rediscovered post-restart whose put.io files are gone).
+// Why this is its own path rather than CompleteTransfer firing it inline:
+// vanishing the transfer from torrent-get the moment local download finished
+// violates *arr's Transmission contract. Sonarr/Radarr's TrackedDownloadService
+// treats a torrent that disappears between polls (without first being observed
+// in a Completed state) as "user removed it" — sets IsTrackable=false, emits
+// no DownloadFailedEvent, doesn't fall back to disk. With Radarr's 60s poll
+// and plundrio's sub-second cleanup, the catch window was a deterministic
+// miss. PurgeTransfer instead waits for an explicit signal:
 //
-// Tolerates both put.io-side NotFound (someone already deleted via the put.io
-// UI, or the orphan path) and a missing in-memory context (the transfer came
-// from a put.io snapshot but never went through CompleteTransfer locally —
-// e.g. a manually-removed transfer). FileID == 0 skips DeleteFile to avoid
-// the cascade-delete-root bug fixed in #25.
+//   - server/torrent.go handleTorrentRemove: the *arr client issues
+//     torrent-remove after a successful import (default-true
+//     RemoveCompletedDownloads). This is the happy path.
+//   - transfers.go purgeStaleProcessed: PostCompleteRetention elapsed
+//     without a torrent-remove (safety net for misconfigured / absent clients).
+//   - transfers.go handleTransferError: the orphan-recovery 404 path on a
+//     transfer rediscovered post-restart whose put.io files are gone.
+//
+// Tolerates put.io-side NotFound (someone deleted via the put.io UI, or the
+// orphan path) and a missing in-memory context (transfer came from a put.io
+// snapshot but never went through CompleteTransfer locally). FileID == 0
+// skips DeleteFile to avoid the cascade-delete-root bug fixed in #25.
 func (m *Manager) PurgeTransfer(transferID int64) error {
 	fileID := int64(0)
 	if ctx, ok := m.coordinator.GetTransferContext(transferID); ok {
@@ -209,6 +206,7 @@ func (m *Manager) PurgeTransfer(transferID int64) error {
 	}
 
 	m.coordinator.DropTransfer(transferID)
+	m.processor.UnmarkTransferProcessed(transferID)
 	return nil
 }
 
@@ -297,37 +295,6 @@ func (m *Manager) QueueDownload(job downloadJob) {
 		// Manager is shutting down, just remove from active files
 		m.activeFiles.Delete(job.FileID)
 	}
-}
-
-// cleanupTransfer handles the deletion of a completed transfer and its source files
-func (m *Manager) cleanupTransfer(transferID int64) {
-	// Get transfer state before cleanup
-	ctx, ok := m.coordinator.GetTransferContext(transferID)
-	if !ok {
-		log.Debug("transfers").
-			Int64("id", transferID).
-			Msg("Transfer not found during cleanup")
-		return
-	}
-
-	log.Debug("transfers").
-		Str("name", ctx.Name).
-		Int64("id", transferID).
-		Int64("file_id", ctx.FileID).
-		Msg("Cleaning up transfer")
-
-	// Complete the transfer in the coordinator, which will run cleanup hooks
-	if err := m.coordinator.CompleteTransfer(transferID); err != nil {
-		log.Error("cleanup").
-			Int64("transfer_id", transferID).
-			Err(err).
-			Msg("Failed to complete transfer")
-	}
-
-	log.Info("transfers").
-		Str("name", ctx.Name).
-		Int64("id", transferID).
-		Msg("Cleaned up transfer")
 }
 
 // handleFileCompletion updates transfer state when a file completes downloading

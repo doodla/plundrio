@@ -717,6 +717,15 @@ func (p *TransferProcessor) MarkTransferProcessed(transferID int64) {
 		Msg("Marked transfer as processed locally")
 }
 
+// UnmarkTransferProcessed removes a transfer's processed-locally flag.
+// Paired with MarkTransferProcessed; called from Manager.PurgeTransfer so the
+// map doesn't grow unbounded across the process lifetime. The flag is only
+// used for the processed_locally log field in logAllTransfersDetails — purely
+// cosmetic — so order with respect to DeleteTransfer doesn't matter.
+func (p *TransferProcessor) UnmarkTransferProcessed(transferID int64) {
+	p.processedTransfers.Delete(transferID)
+}
+
 // processFailedTransfers drives the local retry cascade for transfers in
 // TransferLifecycleFailed (plundrio-internal failures during local
 // download — couldn't fetch download URL, network errors, etc.). Cascade

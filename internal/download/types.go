@@ -186,3 +186,13 @@ func (tc *TransferContext) GetProcessedAt() time.Time {
 	defer tc.mu.RUnlock()
 	return tc.processedAt
 }
+
+// SetProcessedAtForTest overrides processedAt under the context lock. Test-only
+// helper for the retention janitor — production code stamps processedAt only
+// in CompleteTransfer. Mirrors the unexported NewTransferContext escape hatch
+// for tests/cross-package setup.
+func (tc *TransferContext) SetProcessedAtForTest(t time.Time) {
+	tc.mu.Lock()
+	tc.processedAt = t
+	tc.mu.Unlock()
+}
