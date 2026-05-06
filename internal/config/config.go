@@ -40,6 +40,12 @@ type Config struct {
 	// and issue torrent-remove. Zero disables the safety net entirely —
 	// transfers stay until the client removes them, which leaks put.io
 	// quota if the client is misconfigured (RemoveCompletedDownloads=false)
-	// or absent. Default is set in the CLI flag (24h).
+	// or absent.
+	//
+	// Default-construction footgun: the Go zero value (0) means "disabled,"
+	// not "use a sane default." The CLI in cmd/plundrio/main.go injects 24h
+	// via the flag default. Any future entry point that constructs Config
+	// directly must set this field explicitly or the janitor silently
+	// won't run.
 	PostCompleteRetention time.Duration
 }

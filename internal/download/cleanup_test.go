@@ -306,16 +306,29 @@ func TestHandleTransferErrorOn404PurgesOrphan(t *testing.T) {
 	// Orphan-loop scenario: GetAllTransferFiles returns wrapped 404 after
 	// a container restart re-discovers a transfer whose files plundrio
 	// already deleted. Purge must run so the next poll doesn't see it.
-	client := &fakePutioClient{}
-	m := newTestManagerWithClient(client)
-
+	//
+	// In production, checkTransfers populated the put.io snapshot before
+	// processTransfer → handleTransferError fired, so PurgeTransfer's
+	// fallback finds the FileID. We mirror that here by stamping the
+	// snapshot directly. DeleteFile then returns 404 (files truly gone —
+	// that's how we got into the orphan branch in the first place); the
+	// 404 is tolerated and DeleteTransfer still runs.
 	transfer := &putio.Transfer{ID: 42, Name: "Hoppers", FileID: 999}
-	wrappedErr := notFoundError("get transfer files")
+	client := &fakePutioClient{
+		deleteFileErr: notFoundError("delete file"),
+	}
+	m := newTestManagerWithClient(client)
+	snapshot := map[string][]*putio.Transfer{"": {transfer}}
+	m.processor.transfers.Store(&snapshot)
 
+	wrappedErr := notFoundError("get transfer files")
 	m.processor.handleTransferError(transfer, wrappedErr)
 
 	client.mu.Lock()
 	defer client.mu.Unlock()
+	if len(client.deleteFileCalls) != 1 || client.deleteFileCalls[0] != 999 {
+		t.Errorf("DeleteFile calls = %v, want [999] (404 tolerated)", client.deleteFileCalls)
+	}
 	if len(client.deleteTransferCalls) != 1 || client.deleteTransferCalls[0] != 42 {
 		t.Errorf("DeleteTransfer calls = %v, want [42] (orphan must be purged)", client.deleteTransferCalls)
 	}
