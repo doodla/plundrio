@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,26 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// flagViperBindings maps each cobra flag name (hyphenated per CLI convention)
+// to the canonical viper key (underscored, matching mapstructure tags + YAML +
+// env-var-after-replacement). Explicit per-flag binding avoids the symptom of
+// viper.BindPFlags(cmd.Flags()) registering keys under their flag names so that
+// later viper.Unmarshal — which keys off the mapstructure tags — can't see the
+// flag defaults. v0.10.11/12 shipped exactly that bug: GetDuration of
+// "post_complete_retention" missed the flag bound under "post-complete-retention"
+// and silently fell to 0, disabling the retention janitor for a full week.
+//
+// Keep this map's RHS aligned with the mapstructure tags on config.Config.
+var flagViperBindings = map[string]string{
+	"target":                  "target",
+	"folder":                  "folder",
+	"token":                   "token",
+	"listen":                  "listen",
+	"workers":                 "workers",
+	"post-complete-retention": "post_complete_retention",
+	"log-level":               "log_level",
+}
 
 var (
 	version = "dev"
@@ -38,31 +59,65 @@ var rootCmd = &cobra.Command{
 	Version: version,
 }
 
+// loadConfig wires viper to env/config/flags, then decodes into a Config via
+// viper.Unmarshal. The mapstructure tags on Config are the single source of
+// truth for key names. Returns the loaded config plus the resolved log level
+// (separate because log-level is not a Config field — it sets a process-global
+// log level at startup).
+//
+// Pure-ish: takes flags via the cobra command and reads env + filesystem for
+// the optional config file, but does not validate or touch the network. The
+// test suite calls it with a fresh viper to assert default resolution; the run
+// command calls it then layers validation on top.
+func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
+	viper.SetEnvPrefix("PLDR")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
+	viper.AutomaticEnv()
+
+	configFile, _ := cmd.Flags().GetString("config")
+	if configFile != "" {
+		viper.SetConfigFile(configFile)
+		if err := viper.ReadInConfig(); err != nil {
+			return nil, "", fmt.Errorf("read config file %q: %w", configFile, err)
+		}
+		log.Info("config").Str("file", viper.ConfigFileUsed()).Msg("Using config file")
+	}
+
+	for flagName, viperKey := range flagViperBindings {
+		f := cmd.Flags().Lookup(flagName)
+		if f == nil {
+			return nil, "", fmt.Errorf("flag %q not registered on command", flagName)
+		}
+		if err := viper.BindPFlag(viperKey, f); err != nil {
+			return nil, "", fmt.Errorf("bind %q -> %q: %w", flagName, viperKey, err)
+		}
+	}
+
+	var cfg config.Config
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return nil, "", fmt.Errorf("decode config: %w", err)
+	}
+
+	cfg.PutioFolder = strings.ToLower(cfg.PutioFolder)
+
+	token, err := resolveOAuthToken(cfg.OAuthToken, os.Getenv("PLDR_TOKEN_FILE"))
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve oauth token: %w", err)
+	}
+	cfg.OAuthToken = token
+
+	return &cfg, viper.GetString("log_level"), nil
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the download manager",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Initialize Viper
-		viper.SetEnvPrefix("PLDR")
-		viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
-		viper.AutomaticEnv()
-
-		configFile, _ := cmd.Flags().GetString("config")
-		if configFile != "" {
-			viper.SetConfigFile(configFile)
-			if err := viper.ReadInConfig(); err != nil {
-				log.Fatal("config").Str("file", configFile).Err(err).Msg("Error reading config file")
-			}
-			log.Info("config").Str("file", viper.ConfigFileUsed()).Msg("Using config file")
+		cfg, logLevel, err := loadConfig(cmd)
+		if err != nil {
+			log.Fatal("config").Err(err).Msg("Failed to load configuration")
 		}
 
-		// Bind flags to Viper
-		if err := viper.BindPFlags(cmd.Flags()); err != nil {
-			log.Fatal("config").Err(err).Msg("Failed to bind command flags")
-		}
-
-		// Set log level from env/config/flag (in that order)
-		logLevel := viper.GetString("log-level")
 		if logLevel != "" {
 			log.SetLevel(log.LogLevel(logLevel))
 		}
@@ -72,68 +127,43 @@ var runCmd = &cobra.Command{
 			Str("log_level", logLevel).
 			Msg("Starting plundrio")
 
-		// Get configuration values from viper (which checks env vars, config file, and flags)
-		targetDir := viper.GetString("target")
-		putioFolder := strings.ToLower(viper.GetString("folder"))
-		oauthToken, err := resolveOAuthToken(viper.GetString("token"), os.Getenv("PLDR_TOKEN_FILE"))
-		if err != nil {
-			log.Fatal("config").Err(err).Msg("Failed to read PLDR_TOKEN_FILE")
-		}
-		listenAddr := viper.GetString("listen")
-		workerCount := viper.GetInt("workers")
-		postCompleteRetention := viper.GetDuration("post_complete_retention")
-		downloadStartWindow := config.DownloadStartWindowConfig{
-			Enabled: viper.GetBool("download_start_window.enabled"),
-			Start:   viper.GetString("download_start_window.start"),
-			End:     viper.GetString("download_start_window.end"),
-		}
-
-		log.Debug("config").
-			Str("target_dir", targetDir).
-			Str("putio_folder", putioFolder).
-			Str("listen_addr", listenAddr).
-			Int("workers", workerCount).
-			Dur("post_complete_retention", postCompleteRetention).
-			Bool("download_start_window_enabled", downloadStartWindow.Enabled).
-			Str("download_start_window_start", downloadStartWindow.Start).
-			Str("download_start_window_end", downloadStartWindow.End).
+		// INFO-level so the resolved settings show up in `docker logs` on
+		// startup without needing to flip log level. Silent drift between the
+		// CLI defaults and the runtime values has produced subtle production
+		// bugs (see flagViperBindings); surfacing the values keeps the next
+		// instance of that class debuggable in seconds.
+		log.Info("config").
+			Str("target_dir", cfg.TargetDir).
+			Str("putio_folder", cfg.PutioFolder).
+			Str("listen_addr", cfg.ListenAddr).
+			Int("workers", cfg.WorkerCount).
+			Dur("post_complete_retention", cfg.PostCompleteRetention).
+			Bool("download_start_window_enabled", cfg.DownloadStartWindow.Enabled).
+			Str("download_start_window_start", cfg.DownloadStartWindow.Start).
+			Str("download_start_window_end", cfg.DownloadStartWindow.End).
 			Msg("Configuration loaded")
 
-		// Validate required configuration values
-		// Security warning for token in config file
 		if viper.ConfigFileUsed() != "" && viper.IsSet("token") {
 			log.Warn("security").
 				Str("file", viper.ConfigFileUsed()).
 				Msg("OAuth token found in config file - consider using environment variable PLDR_TOKEN instead")
 		}
 
-		if targetDir == "" || putioFolder == "" || oauthToken == "" {
+		if cfg.TargetDir == "" || cfg.PutioFolder == "" || cfg.OAuthToken == "" {
 			log.Error("config").Msg("Not all required configuration values were provided")
 			_ = cmd.Usage()
 			os.Exit(1)
 		}
 
-		// Verify target directory exists
-		stat, err := os.Stat(targetDir)
+		stat, err := os.Stat(cfg.TargetDir)
 		if err != nil {
 			if os.IsNotExist(err) {
-				log.Fatal("config").Str("dir", targetDir).Msg("Target directory does not exist")
+				log.Fatal("config").Str("dir", cfg.TargetDir).Msg("Target directory does not exist")
 			}
-			log.Fatal("config").Str("dir", targetDir).Err(err).Msg("Error checking target directory")
+			log.Fatal("config").Str("dir", cfg.TargetDir).Err(err).Msg("Error checking target directory")
 		}
 		if !stat.IsDir() {
-			log.Fatal("config").Str("dir", targetDir).Msg("Target path is not a directory")
-		}
-
-		// Initialize configuration
-		cfg := &config.Config{
-			TargetDir:             targetDir,
-			PutioFolder:           putioFolder,
-			OAuthToken:            oauthToken,
-			ListenAddr:            listenAddr,
-			WorkerCount:           workerCount,
-			DownloadStartWindow:   downloadStartWindow,
-			PostCompleteRetention: postCompleteRetention,
+			log.Fatal("config").Str("dir", cfg.TargetDir).Msg("Target path is not a directory")
 		}
 
 		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
@@ -323,16 +353,23 @@ var getTokenCmd = &cobra.Command{
 	},
 }
 
+// registerRunFlags registers the flags accepted by `plundrio run`. Extracted
+// from init() so tests can construct fresh cobra commands with the same flag
+// shape (pflag/cobra forbid re-registering flags on the same command, so the
+// package-global runCmd is unusable across multiple test cases).
+func registerRunFlags(cmd *cobra.Command) {
+	cmd.Flags().String("config", "", "Config file (default $HOME/.plundrio.yaml)")
+	cmd.Flags().StringP("target", "t", "", "Target directory for downloads (required)")
+	cmd.Flags().StringP("folder", "f", "plundrio", "Put.io folder name")
+	cmd.Flags().StringP("token", "k", "", "Put.io OAuth token (required)")
+	cmd.Flags().StringP("listen", "l", ":9091", "Listen address")
+	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
+	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
+	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
+}
+
 func init() {
-	// Run command flags
-	runCmd.Flags().String("config", "", "Config file (default $HOME/.plundrio.yaml)")
-	runCmd.Flags().StringP("target", "t", "", "Target directory for downloads (required)")
-	runCmd.Flags().StringP("folder", "f", "plundrio", "Put.io folder name")
-	runCmd.Flags().StringP("token", "k", "", "Put.io OAuth token (required)")
-	runCmd.Flags().StringP("listen", "l", ":9091", "Listen address")
-	runCmd.Flags().IntP("workers", "w", 4, "Number of workers")
-	runCmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
-	runCmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
+	registerRunFlags(runCmd)
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(getTokenCmd)

@@ -5,33 +5,43 @@ import "time"
 // DownloadStartWindowConfig gates when new local downloads may begin.
 // It only affects the start of local downloads, not ongoing transfers.
 type DownloadStartWindowConfig struct {
-	Enabled bool
-	Start   string
-	End     string
+	Enabled bool   `mapstructure:"enabled"`
+	Start   string `mapstructure:"start"`
+	End     string `mapstructure:"end"`
 }
 
-// Config holds the runtime configuration
+// Config holds the runtime configuration.
+//
+// The mapstructure tags are the canonical key form: they match the YAML
+// keys in the generated sample config, the env-var suffixes under the
+// PLDR_ prefix (after SetEnvKeyReplacer normalizes "_" <-> "-"), and the
+// keys that cmd/plundrio/main.go binds CLI flags under via viper.BindPFlag.
+// Drift between these surfaces is the bug that produced v0.10.11/12's silent
+// retention-janitor no-op — keep them in sync.
 type Config struct {
-	// TargetDir is where completed downloads will be stored
-	TargetDir string
+	// TargetDir is where completed downloads will be stored.
+	TargetDir string `mapstructure:"target"`
 
-	// PutioFolder is the name of the folder in Put.io
-	PutioFolder string
+	// PutioFolder is the name of the folder in Put.io.
+	PutioFolder string `mapstructure:"folder"`
 
-	// FolderID is the Put.io folder ID (set after creation/lookup)
-	FolderID int64
+	// FolderID is the Put.io folder ID (resolved at startup; not read from
+	// config).
+	FolderID int64 `mapstructure:"-"`
 
-	// OAuthToken is the Put.io OAuth token
-	OAuthToken string
+	// OAuthToken is the Put.io OAuth token. May also be supplied via
+	// PLDR_TOKEN_FILE for systemd LoadCredential-style delivery; see
+	// resolveOAuthToken in cmd/plundrio.
+	OAuthToken string `mapstructure:"token"`
 
-	// ListenAddr is the address to listen for transmission-rpc requests
-	ListenAddr string
+	// ListenAddr is the address to listen for transmission-rpc requests.
+	ListenAddr string `mapstructure:"listen"`
 
-	// WorkerCount is the number of concurrent download workers (default: 4)
-	WorkerCount int
+	// WorkerCount is the number of concurrent download workers (default: 4).
+	WorkerCount int `mapstructure:"workers"`
 
 	// DownloadStartWindow optionally restricts when new local downloads may start.
-	DownloadStartWindow DownloadStartWindowConfig
+	DownloadStartWindow DownloadStartWindowConfig `mapstructure:"download_start_window"`
 
 	// PostCompleteRetention is the grace period between local download
 	// completion and unilateral DeleteTransfer on put.io. While the timer
@@ -47,5 +57,5 @@ type Config struct {
 	// via the flag default. Any future entry point that constructs Config
 	// directly must set this field explicitly or the janitor silently
 	// won't run.
-	PostCompleteRetention time.Duration
+	PostCompleteRetention time.Duration `mapstructure:"post_complete_retention"`
 }
