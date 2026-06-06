@@ -13,6 +13,7 @@ import (
 
 	"github.com/doodla/plundrio/internal/api"
 	"github.com/doodla/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/demo"
 	"github.com/doodla/plundrio/internal/download"
 	"github.com/doodla/plundrio/internal/log"
 	"github.com/doodla/plundrio/internal/server"
@@ -109,6 +110,14 @@ func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 	return &cfg, viper.GetString("log_level"), nil
 }
 
+// putioClient is the union of the put.io methods the download manager and the
+// RPC server require. Both *api.Client (real) and *demo.Client (--demo) satisfy
+// it, so the boot path can swap one for the other behind a single variable.
+type putioClient interface {
+	download.PutioClient
+	server.PutioClient
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the download manager",
@@ -116,6 +125,16 @@ var runCmd = &cobra.Command{
 		cfg, logLevel, err := loadConfig(cmd)
 		if err != nil {
 			log.Fatal("config").Err(err).Msg("Failed to load configuration")
+		}
+
+		// Demo mode swaps the real put.io client for an in-process fake that
+		// serves synthetic data. Resolved from the flag OR PLDR_DEMO so it
+		// works in compose without a flag. It is deliberately NOT a Config
+		// field: it's a boot-time control, never persisted, and must never be
+		// confusable with production (logged loudly below).
+		demoMode, _ := cmd.Flags().GetBool("demo")
+		if v := os.Getenv("PLDR_DEMO"); v == "1" || strings.EqualFold(v, "true") {
+			demoMode = true
 		}
 
 		if logLevel != "" {
@@ -149,7 +168,10 @@ var runCmd = &cobra.Command{
 				Msg("OAuth token found in config file - consider using environment variable PLDR_TOKEN instead")
 		}
 
-		if cfg.TargetDir == "" || cfg.PutioFolder == "" || cfg.OAuthToken == "" {
+		// In demo mode the OAuth token is irrelevant — the fake client never
+		// touches put.io. Require only the values the demo still needs (a
+		// target dir to write synthetic downloads into, and a folder name).
+		if cfg.TargetDir == "" || cfg.PutioFolder == "" || (!demoMode && cfg.OAuthToken == "") {
 			log.Error("config").Msg("Not all required configuration values were provided")
 			_ = cmd.Usage()
 			os.Exit(1)
@@ -170,32 +192,49 @@ var runCmd = &cobra.Command{
 			log.Fatal("config").Err(err).Msg("Invalid download start window configuration")
 		}
 
-		// Initialize Put.io API client
-		client := api.NewClient(cfg.OAuthToken)
+		// Initialize the put.io client. Demo mode swaps in the in-process fake
+		// and skips every network call (auth + folder resolution); the fake
+		// never reads a real token path. The variable is the interface union so
+		// both download.New and server.New accept either implementation.
+		var client putioClient
+		if demoMode {
+			const demoFolderID int64 = 99_000
+			log.Warn("demo").
+				Bool("fake_data", true).
+				Str("target_dir", cfg.TargetDir).
+				Msg("=== DEMO MODE: serving synthetic put.io data — NOT a real account, no token used ===")
+			demoClient := demo.NewClient(demoFolderID)
+			defer demoClient.Stop()
+			client = demoClient
+			cfg.FolderID = demoFolderID
+		} else {
+			realClient := api.NewClient(cfg.OAuthToken)
 
-		// Authenticate and get account info
-		log.Info("auth").Msg("Authenticating with Put.io...")
-		authCtx, authCancel := context.WithTimeout(context.Background(), startupCallTimeout)
-		err = client.Authenticate(authCtx)
-		authCancel()
-		if err != nil {
-			log.Fatal("auth").Err(err).Msg("Failed to authenticate with Put.io")
-		}
-		log.Info("auth").Msg("Authentication successful")
+			// Authenticate and get account info
+			log.Info("auth").Msg("Authenticating with Put.io...")
+			authCtx, authCancel := context.WithTimeout(context.Background(), startupCallTimeout)
+			err = realClient.Authenticate(authCtx)
+			authCancel()
+			if err != nil {
+				log.Fatal("auth").Err(err).Msg("Failed to authenticate with Put.io")
+			}
+			log.Info("auth").Msg("Authentication successful")
 
-		// Create/get folder ID
-		log.Info("setup").Str("folder", cfg.PutioFolder).Msg("Setting up Put.io folder")
-		folderCtx, folderCancel := context.WithTimeout(context.Background(), startupCallTimeout)
-		folderID, err := client.EnsureFolder(folderCtx, cfg.PutioFolder)
-		folderCancel()
-		if err != nil {
-			log.Fatal("setup").Str("folder", cfg.PutioFolder).Err(err).Msg("Failed to create/get folder")
+			// Create/get folder ID
+			log.Info("setup").Str("folder", cfg.PutioFolder).Msg("Setting up Put.io folder")
+			folderCtx, folderCancel := context.WithTimeout(context.Background(), startupCallTimeout)
+			folderID, err := realClient.EnsureFolder(folderCtx, cfg.PutioFolder)
+			folderCancel()
+			if err != nil {
+				log.Fatal("setup").Str("folder", cfg.PutioFolder).Err(err).Msg("Failed to create/get folder")
+			}
+			cfg.FolderID = folderID
+			log.Info("setup").
+				Str("folder", cfg.PutioFolder).
+				Int64("folder_id", folderID).
+				Msg("Using Put.io folder")
+			client = realClient
 		}
-		cfg.FolderID = folderID
-		log.Info("setup").
-			Str("folder", cfg.PutioFolder).
-			Int64("folder_id", folderID).
-			Msg("Using Put.io folder")
 
 		// Initialize download manager
 		dlManager := download.New(cfg, client)
@@ -366,6 +405,7 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
+	cmd.Flags().Bool("demo", false, "Run with a fake in-process put.io client serving synthetic data (also via PLDR_DEMO=1). For dashboard development/screenshots; never touches a real account or token.")
 }
 
 func init() {
