@@ -1,12 +1,42 @@
-# Dashboard mockups — Pass 1 directions
+# Dashboard mockups
 
 Self-contained static pages for the plundrio web dashboard, each rendering all four core surfaces
 (transfers with the two-phase progress hero across every lifecycle state, account/quota, live log
 viewer, settings). No framework, no build, no network — seed values hand-placed so they screenshot
-offline. All four surfaces are on one scrolling page per direction. The operator picks one; Pass 2
-(the design spec) follows the pick.
+offline.
 
 ---
+
+## CHOSEN — `relaydeck` (combo of relay + tarmac, light + dark)
+
+The operator picked a **combo of `relay` + `tarmac` with full light/dark theme support**. The
+synthesis lives at `mockups/relaydeck/` and the Pass 2 design spec at `mockups/SPEC.md`.
+
+- **DNA:** tarmac's instrument-console aesthetic (graphite, precise, cockpit-legible) as the base.
+- **Fused hero — the flow-gauge:** ONE 270° instrument that is both a glanceable combined-% dial
+  (tarmac) and an explicit put.io→local journey (relay): steel put.io arc → handoff node at 12
+  o'clock → chartreuse local arc, a comet head riding the active leg's leading edge, combined % in
+  the center. Mini version per fleet row.
+- **Accent:** **chartreuse** (amber is reserved for restart/caution state semantics; chartreuse is
+  semantically free, doubles as the local-download phase color, and darkens cleanly for light theme).
+- **Themes:** two complete token sets; light theme keeps the instrument identity (cool
+  graphite-on-pale-steel), not editorial. Default dark, honors `prefers-color-scheme`, visible ☀/☾
+  toggle in the rail.
+
+### Files to screenshot (both themes)
+
+`relaydeck/index.html` honors a `?theme=` query param so the same file captures both:
+
+- `/Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?theme=dark` — desktop (1320px) + mobile (390px)
+- `/Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?theme=light` — desktop (1320px) + mobile (390px)
+
+Open via `file://` (offline). `?theme=` is authoritative for captures; without it, defaults to
+`prefers-color-scheme` then dark.
+
+---
+
+## Round 1 — REJECTED (generic)
+
 
 ## Round 1 — REJECTED (generic)
 
