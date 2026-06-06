@@ -35,8 +35,18 @@ glanceable combined-% dial (tarmac) and an explicit put.io→local journey (rela
 
 ## 2. Design tokens — BOTH themes
 
-Implement as CSS custom properties on `:root[data-theme="dark"]` (default) and
-`:root[data-theme="light"]`. Token names are the contract; values are exact.
+> **⚠ PALETTE PENDING PICK.** The operator approved the layout + fused flow-gauge but rejected the
+> chartreuse/steel palette below and is choosing among three recolor candidates (`tide` / `ember` /
+> `ion`) rendered in `mockups/relaydeck/index.html` (`?palette=&theme=`). **The color values in §2.1
+> (surfaces) and §2.3 (phase & state) are STALE pending that pick** — only the structure (token
+> names, ramp shape, roles) is final. The hero dial glow (former `.bay` radial bloom) has been
+> **removed**; the gauge bay is a flat instrument surface and arc/comet glows are restrained to a
+> crisp edge. This SPEC will be finalized to the chosen palette's exact values after the operator
+> picks. §2.5 (type), §2.6 (spacing/radius), §3–§10 are unaffected by the palette pick.
+
+Implement as CSS custom properties keyed on `:root[data-palette="<pal>"][data-theme="<dark|light>"]`
+(theme default dark; palette default = the chosen one). Token names are the contract; values become
+exact once the palette is picked.
 
 ### 2.1 Color — neutral ramp & surfaces
 

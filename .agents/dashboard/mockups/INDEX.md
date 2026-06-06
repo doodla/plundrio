@@ -14,29 +14,47 @@ synthesis lives at `mockups/relaydeck/` and the Pass 2 design spec at `mockups/S
 
 - **DNA:** tarmac's instrument-console aesthetic (graphite, precise, cockpit-legible) as the base.
 - **Fused hero — the flow-gauge:** ONE 270° instrument that is both a glanceable combined-% dial
-  (tarmac) and an explicit put.io→local journey (relay): steel put.io arc → handoff node at 12
-  o'clock → chartreuse local arc, a comet head riding the active leg's leading edge, combined % in
-  the center. Mini version per fleet row.
-- **Accent:** **chartreuse** (amber is reserved for restart/caution state semantics; chartreuse is
-  semantically free, doubles as the local-download phase color, and darkens cleanly for light theme).
-- **Themes:** two complete token sets; light theme keeps the instrument identity (cool
-  graphite-on-pale-steel), not editorial. Default dark, honors `prefers-color-scheme`, visible ☀/☾
-  toggle in the rail.
+  (tarmac) and an explicit put.io→local journey (relay): put.io arc → handoff node at 12 o'clock →
+  local arc (the accent), a comet head riding the active leg's leading edge, combined % in the
+  center. Mini version per fleet row.
 
-### Files to screenshot (both themes)
+**Review status:** layout + fused hero + structure **APPROVED**. Two fixes applied:
+1. **Hero dial glow removed** (the radial bloom under the gauge read as out of place) — the gauge bay
+   is now a flat instrument surface; arc/comet glows restrained to a crisp edge.
+2. **Palette in review.** The original chartreuse/steel palette was rejected ("colors not that
+   good"). Three recolor candidates are now selectable for the operator to pick from — **same layout,
+   same hero, only the color system changes.** SPEC §2 palette tokens are held as *pending pick*.
 
-`relaydeck/index.html` honors a `?theme=` query param so the same file captures both:
+### Palette candidates (pick one)
 
-- `/Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?theme=dark` — desktop (1320px) + mobile (390px)
-- `/Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?theme=light` — desktop (1320px) + mobile (390px)
+| Slug | Mood (one line) |
+|------|-----------------|
+| `tide`  | Cool marine instrument — slate-teal graphite, azure put.io handing off to aqua-teal local; clinical, oceanic. |
+| `ember` | Refined warm graphite — warm charcoal, cool periwinkle put.io handing off to warm coral local (cool→warm reinforces the journey); confident, warm. |
+| `ion`   | Restrained near-monochrome graphite with one bold electric-indigo accent; muted steel put.io recedes, indigo local pops; premium dev-tool. |
 
-Open via `file://` (offline). `?theme=` is authoritative for captures; without it, defaults to
-`prefers-color-scheme` then dark.
+All three are committed in **both** light and dark, keep the put.io/local phase distinction legible
+in every combo, and reserve amber for semantic state (restart/caution) so the accent never collides
+with state meaning. Default palette = `tide`.
+
+### Files to screenshot (palette × theme)
+
+`relaydeck/index.html` honors `?palette=` and `?theme=` (both resolved before paint), so the one file
+captures every combo. Capture each at desktop (1320px); add mobile (390px) for the leading pick.
+
+```
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=tide&theme=dark
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=tide&theme=light
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=ember&theme=dark
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=ember&theme=light
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=ion&theme=dark
+file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=ion&theme=light
+```
+
+Open via `file://` (offline). `?palette=` and `?theme=` are authoritative; without them, defaults are
+`palette=tide`, theme from `prefers-color-scheme` then dark.
 
 ---
-
-## Round 1 — REJECTED (generic)
-
 
 ## Round 1 — REJECTED (generic)
 
