@@ -13,14 +13,21 @@ None of that exists yet. You build it, front-loaded, so the later gates are trus
 ## Deliverables
 
 1. **Seed / demo mode in the daemon.** A flag (e.g. `--demo` / `PLDR_DEMO`) that swaps the real
-   put.io client for a fake implementing the same `PutioClient` interfaces (`internal/server` and
-   `internal/download` both define one — satisfy both). The fake emits a realistic, evolving set
-   of transfers that progress through both phases over time (put.io fetch advancing, then local
-   download advancing), a plausible account/quota, and periodic synthetic log lines at varied
-   levels. Determinism: seed from a fixed value so screenshots are reproducible; advancement is
-   driven by injected/virtual time, not `Date.now()`-style wall clock, so a snapshot run is
-   repeatable. Reuse and extend the existing `fakePutioClient` in
-   `internal/download/cleanup_test.go` rather than forking a parallel fake.
+   put.io client for a fake. **This fake is RUNTIME code, not a test fake** — it compiles into the
+   binary, so it lives in a non-`_test.go` package (e.g. `internal/demo`), and it must satisfy
+   **both** runtime interfaces: `server.PutioClient` (`GetAccountInfo, GetTransfers, UploadFile,
+   AddTransfer, DeleteFile, DeleteTransfer`) **and** `download.PutioClient` (`GetTransfers,
+   GetAllTransferFiles, RetryTransfer, DeleteTransfer, DeleteFile, GetDownloadURL`). The test-only
+   `fakePutioClient` in `internal/download/cleanup_test.go` is the WRONG base — it is `_test.go`,
+   package-private, and satisfies only the download side; copy its *shape* for reference if useful,
+   but the demo fake is a distinct compiled component. Swap seam: `cmd/plundrio/main.go` where
+   `client := api.NewClient(...)` is constructed (~line 174): `if cfg.Demo { client = demo.NewClient() }`.
+   The fake emits a realistic, evolving set of transfers that progress through both phases over time
+   (put.io fetch advancing 0→100, then local download advancing), a plausible account/quota, and
+   periodic synthetic log lines at varied levels. Determinism: seed from a fixed value so
+   screenshots are reproducible; advancement is driven by injected/virtual time, not
+   `Date.now()`-style wall clock, so a snapshot run is repeatable. (Standard `testing.T`-level unit
+   probing MAY still reuse the existing test fake — that is separate from this runtime demo fake.)
 
 2. **Endpoint prober.** A Go test (or small harness) that boots the dashboard server on an
    ephemeral port in demo mode, hits every REST endpoint in `plan/contract.md`, and asserts the

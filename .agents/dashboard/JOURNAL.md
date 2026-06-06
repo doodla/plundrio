@@ -69,3 +69,20 @@ deleted). This is the recorded rationale for treating the gate as cleared.
 
 No agent-loop revision: the bounce traced to design errors the gate caught, not to a weak role
 prompt. The planner and plan-reviewer role files held.
+
+## 2026-06-06 — Agent-loop revision: harness-builder (pre-failure)
+
+Revised `roles/harness-builder.md` deliverable 1 before spawning it. The prompt said to "reuse and
+extend the existing `fakePutioClient` in `cleanup_test.go`" for `--demo` mode. That's a dead end:
+that fake is `_test.go` (not compiled into the binary) and satisfies only `download.PutioClient`,
+but a RUNTIME demo client must be compiled code satisfying BOTH `server.PutioClient` and
+`download.PutioClient`. The role now says the demo fake is a distinct compiled component (e.g.
+`internal/demo`), enumerates both interfaces' method sets, names the `main.go` swap seam, and notes
+the test fake may still serve unit-level probing separately.
+
+Caught by re-reading the role against the actual interfaces before dispatch — the agent loop working
+pre-failure (cheaper than catching it after the builder goes down the wrong path). Also authored the
+M4–M6 role files (backend-builder, code-reviewer, build-engineer, integration-verifier) now that the
+contract is frozen; frontend-builder + ui-reviewer remain deferred until the operator picks a design.
+
+State: M0 ✓, M1 ✓ (gate passed). M3 ux-designer running (mockups). Launching M2 harness-builder next.
