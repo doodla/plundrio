@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plundrio · tarmac</title>
+<style>
+/* ============================================================================
+   DIRECTION: tarmac
+   An instrument cluster, not a dashboard-of-cards. The two-phase progress is a
+   270° gauge: the needle sweeps the LEFT arc (put.io fetch, steel) then the RIGHT
+   arc (local download, sodium amber) — the 12-o'clock mark is the 50% handoff.
+   Combined % is the big readout in the dial. Layout is an asymmetric panel:
+   one master gauge + a strip of secondary instruments + a console of logs + a
+   settings rack. Graphite + sodium amber. Numerals are mono, engraved.
+   ============================================================================ */
+
+:root{
+  --steel-000:#070809;
+  --steel-050:#0c0e10;
+  --steel-100:#101316;
+  --steel-150:#14181c;
+  --steel-200:#191e23;
+  --steel-300:#222a31;
+  --steel-400:#2e3942;
+  --hair:rgba(150,175,195,.08);
+  --hair-2:rgba(150,175,195,.14);
+
+  --ink:#dfe7ee;
+  --ink-2:#9aa8b5;
+  --ink-3:#637280;
+  --ink-4:#454f59;
+
+  /* phase channels */
+  --p1:#6ec1ff;          /* put.io fetch — cold steel-blue */
+  --p1-deep:#1c4d74;
+  --amber:#ffb020;       /* the committed accent — sodium / runway lamp */
+  --amber-deep:#7a4e00;
+  --amber-glow:rgba(255,176,32,.5);
+  --green:#46d18a;
+  --red:#ff5d52;
+  --red-deep:#5a1c1a;
+
+  --sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(110,193,255,.05), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,255,255,.012) 38px 39px),
+    var(--steel-000);
+  color:var(--ink);
+  font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+/* riveted top rail */
+.rail{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:18px;height:56px;padding:0 26px;
+  background:linear-gradient(180deg,#0f1316,#0b0e10);border-bottom:1px solid var(--hair-2);
+  box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 8px 26px -18px #000}
+.brand{display:flex;align-items:center;gap:11px;font-weight:600;letter-spacing:-.01em}
+.brand .sig{width:15px;height:15px;border-radius:50%;background:conic-gradient(from -135deg,var(--p1) 0 50%,var(--amber) 50% 100%);
+  box-shadow:0 0 0 1px var(--hair-2),0 0 14px var(--amber-glow);position:relative}
+.brand .sig::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--steel-000)}
+.brand b{color:#fff}.brand .v{font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+.rail nav{display:flex;gap:2px;margin-left:12px}
+.rail nav a{color:var(--ink-3);text-decoration:none;font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding:7px 13px;border-radius:7px;transition:.15s}
+.rail nav a.on{color:#fff;background:var(--steel-200);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.rail nav a:hover{color:var(--ink)}
+.status{margin-left:auto;display:flex;align-items:center;gap:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2)}
+.status .t{color:var(--ink-4)}
+.status .live{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:7px;background:rgba(70,209,138,.07);box-shadow:inset 0 0 0 1px rgba(70,209,138,.2)}
+.status .live .d{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 9px rgba(70,209,138,.6);animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+main{max-width:1320px;margin:0 auto;padding:26px 26px 90px}
+.eyebrow{display:flex;align-items:center;gap:14px;margin:0 0 16px}
+.eyebrow h2{margin:0;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.eyebrow .ln{flex:1;height:1px;background:var(--hair)}
+.eyebrow .meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.eyebrow .meta b{color:var(--amber)}
+
+/* ============ MASTER PANEL: big gauge + account instruments ============ */
+.panel{display:grid;grid-template-columns:380px 1fr;gap:0;margin-bottom:42px;border-radius:16px;overflow:hidden;
+  border:1px solid var(--hair-2);background:linear-gradient(180deg,var(--steel-150),var(--steel-100));
+  box-shadow:0 28px 70px -36px #000, inset 0 1px 0 rgba(255,255,255,.04)}
+
+/* --- the gauge bay --- */
+.bay{position:relative;padding:30px 26px;border-right:1px solid var(--hair);background:
+  radial-gradient(420px 420px at 50% 46%, rgba(255,176,32,.05), transparent 64%),var(--steel-050)}
+.bayHead{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.bayHead .chip{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);
+  background:rgba(255,176,32,.1);padding:3px 8px;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,176,32,.24)}
+.bayHead .cat{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  background:var(--steel-200);padding:3px 8px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--hair)}
+.bayName{font-size:15px;font-weight:600;letter-spacing:-.01em;color:#fff;margin:6px 0 2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.baySub{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+
+.gauge{position:relative;width:300px;height:300px;margin:14px auto 6px}
+.gauge svg{width:100%;height:100%;display:block;transform:rotate(135deg)} /* gap at bottom */
+.gauge .track{fill:none;stroke:var(--steel-300);stroke-width:14;stroke-linecap:round}
+.gauge .arc1{fill:none;stroke:url(#g1);stroke-width:14;stroke-linecap:round;filter:drop-shadow(0 0 6px rgba(110,193,255,.4))}
+.gauge .arc2{fill:none;stroke:url(#g2);stroke-width:14;stroke-linecap:round;filter:drop-shadow(0 0 9px var(--amber-glow))}
+.gauge .ticks line{stroke:var(--hair-2);stroke-width:1.5}
+.gauge .midmark{stroke:var(--ink-4);stroke-width:2.5}
+/* center readout */
+.dial{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.dial .big{font-family:var(--mono);font-size:74px;font-weight:600;letter-spacing:-.05em;line-height:.8;color:#fff;
+  background:linear-gradient(180deg,#fff,#bcc8d4);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.dial .big sup{font-size:26px;color:var(--ink-3);vertical-align:super;-webkit-text-fill-color:var(--ink-3)}
+.dial .lab{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-4);margin-top:6px}
+.dial .rate{font-family:var(--mono);font-size:15px;color:var(--amber);margin-top:9px;display:flex;align-items:center;gap:6px}
+.dial .rate .arr{animation:nudge 1.4s ease-in-out infinite}
+@keyframes nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(2px)}}
+/* sweeping needle glint at the active arc tip */
+.tip{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--amber);box-shadow:0 0 16px var(--amber-glow);
+  left:calc(50% + 96px);top:calc(50% + 22px);animation:glint 1.8s ease-in-out infinite}
+@keyframes glint{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.74)}}
+
+/* phase legend under gauge */
+.legend{display:flex;gap:0;margin-top:8px;border-radius:10px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--hair)}
+.legend .lg{flex:1;padding:11px 14px;background:var(--steel-100)}
+.legend .lg+.lg{border-left:1px solid var(--hair)}
+.legend .lg.muted{opacity:.5}
+.legend .lg .k{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.legend .lg .k i{width:7px;height:7px;border-radius:2px}
+.legend .lg.p1 .k i{background:var(--p1)}.legend .lg.p2 .k i{background:var(--amber)}
+.legend .lg .v{font-family:var(--mono);font-size:13px;color:var(--ink);margin-top:5px}
+.legend .lg .v b{color:#fff}
+
+/* --- account instruments cluster on the right --- */
+.cluster{padding:26px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:18px}
+.gid{display:flex;align-items:center;gap:13px;grid-column:1/-1}
+.gid .av{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--p1),var(--amber));
+  display:grid;place-items:center;color:#0a0a0a;font-weight:700;font-size:18px;box-shadow:0 6px 20px -8px var(--amber-glow)}
+.gid .who{font-size:16px;font-weight:600;color:#fff}.gid .who small{display:block;font-family:var(--mono);font-size:11px;color:var(--ink-3);font-weight:400}
+.gid .plan{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);
+  background:rgba(255,176,32,.1);padding:5px 10px;border-radius:7px;box-shadow:inset 0 0 0 1px rgba(255,176,32,.22)}
+/* sub-instruments */
+.inst{border-radius:12px;background:var(--steel-050);box-shadow:inset 0 0 0 1px var(--hair),inset 0 2px 8px rgba(0,0,0,.4);padding:16px 18px;display:flex;flex-direction:column;justify-content:center}
+.inst .lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4)}
+.inst .read{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:-.04em;color:#fff;margin-top:6px;line-height:1}
+.inst .read .u{font-size:14px;color:var(--ink-3);margin-left:3px}
+.inst .sub{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:6px}
+.inst.disk{grid-column:1/-1}
+/* disk = horizontal slider gauge with sodium fill */
+.diskBar{height:16px;border-radius:9px;margin-top:12px;background:var(--steel-300);overflow:hidden;position:relative;
+  box-shadow:inset 0 0 0 1px var(--hair),inset 0 2px 6px rgba(0,0,0,.5)}
+.diskBar .ticks{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 9.5%,rgba(0,0,0,.4) 9.5% 10%);z-index:2;pointer-events:none}
+.diskBar i{display:block;height:100%;width:66.8%;background:linear-gradient(90deg,var(--amber-deep),var(--amber));box-shadow:0 0 18px var(--amber-glow)}
+.diskLegend{display:flex;justify-content:space-between;margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.diskLegend b{color:var(--ink)}
+
+/* ============ SECONDARY INSTRUMENT STRIP (fleet) ============ */
+.strip{display:flex;flex-direction:column;gap:10px}
+.tr{display:grid;grid-template-columns:54px 1fr 150px 96px;gap:18px;align-items:center;
+  padding:14px 18px 14px 14px;border-radius:12px;background:var(--steel-100);border:1px solid var(--hair);transition:.15s}
+.tr:hover{border-color:var(--hair-2);background:var(--steel-150)}
+/* mini dial for each fleet member */
+.mini{position:relative;width:50px;height:50px}
+.mini svg{width:100%;height:100%;transform:rotate(135deg)}
+.mini .t{fill:none;stroke:var(--steel-300);stroke-width:5;stroke-linecap:round}
+.mini .a1{fill:none;stroke:var(--p1);stroke-width:5;stroke-linecap:round}
+.mini .a2{fill:none;stroke:var(--amber);stroke-width:5;stroke-linecap:round}
+.mini .pc{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);font-size:13px;font-weight:600;color:#fff}
+.trN .nm{font-size:14px;font-weight:500;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+.trN .st{display:flex;align-items:center;gap:8px;margin-top:5px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.trN .st .d{width:6px;height:6px;border-radius:50%}
+.d.fetch{background:var(--p1);box-shadow:0 0 7px rgba(110,193,255,.6);animation:pulse 1.6s ease-in-out infinite}
+.d.local{background:var(--amber);box-shadow:0 0 7px var(--amber-glow);animation:pulse 1.6s ease-in-out infinite}
+.d.queued{background:var(--ink-4)}.d.done{background:var(--green)}.d.fail{background:var(--red);box-shadow:0 0 7px rgba(255,93,82,.6)}
+.trBars{display:flex;flex-direction:column;gap:5px}
+.trBars .b{height:5px;border-radius:3px;background:var(--steel-300);overflow:hidden;position:relative}
+.trBars .b i{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+.trBars .b.p1 i{background:linear-gradient(90deg,var(--p1-deep),var(--p1))}
+.trBars .b.p2 i{background:linear-gradient(90deg,var(--amber-deep),var(--amber));box-shadow:0 0 9px var(--amber-glow)}
+.trBars .lab{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-4)}
+.trMeta{text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.trMeta b{display:block;font-size:13px;color:var(--ink);margin-bottom:2px}
+.tr.queued{opacity:.74}
+.tr.fail{border-color:var(--red-deep);background:linear-gradient(90deg,rgba(90,28,26,.2),var(--steel-100))}
+.tr.fail .mini .a1,.tr.fail .mini .a2{stroke:var(--red)}
+.failBar{grid-column:1/-1;margin-top:2px;display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;color:#ff9b94}
+.failBar .pb{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#ffb4ae;background:rgba(255,93,82,.12);padding:2px 7px;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(255,93,82,.3)}
+
+/* ============ LOG CONSOLE ============ */
+.console{border-radius:14px;overflow:hidden;border:1px solid var(--hair-2);background:var(--steel-000)}
+.cHead{display:flex;align-items:center;gap:9px;padding:11px 18px;background:var(--steel-100);border-bottom:1px solid var(--hair)}
+.lvl{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:6px;color:var(--ink-3);background:var(--steel-200);box-shadow:inset 0 0 0 1px var(--hair)}
+.lvl.on{color:#fff;background:var(--steel-400);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.cHead .auto{margin-left:auto;display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.cHead .auto .d{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 7px rgba(70,209,138,.6);animation:pulse 2s ease-in-out infinite}
+.cBody{font-family:var(--mono);font-size:12.5px;line-height:1.95;padding:8px 0;max-height:320px;overflow:hidden}
+.ln2{display:grid;grid-template-columns:5px 76px 56px 108px 1fr;gap:13px;padding:1px 18px 1px 0;align-items:baseline}
+.ln2 .bar{height:100%;min-height:15px}
+.ln2.debug .bar{background:transparent}.ln2.info .bar{background:var(--p1)}.ln2.warn .bar{background:var(--amber)}.ln2.error .bar{background:var(--red)}
+.ln2:hover{background:rgba(255,255,255,.02)}
+.ln2.fresh{animation:flash 1s ease-out}
+@keyframes flash{0%{background:rgba(255,176,32,.1)}100%{background:transparent}}
+.ln2 .ts{color:var(--ink-4)}
+.ln2 .lv{text-transform:uppercase;font-size:10px;letter-spacing:.05em}
+.ln2.debug .lv{color:var(--ink-3)}.ln2.info .lv{color:var(--p1)}.ln2.warn .lv{color:var(--amber)}.ln2.error .lv{color:var(--red)}
+.ln2 .co{color:var(--amber);opacity:.82}
+.ln2 .msg{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ln2 .msg b{color:var(--ink);font-weight:400}.ln2 .msg .f{color:var(--ink-4)}
+
+/* ============ SETTINGS RACK ============ */
+.rack{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.slot{padding:17px 19px;border-radius:12px;background:var(--steel-100);border:1px solid var(--hair);position:relative}
+.slot.wide{grid-column:1/-1}
+.slot .sh{display:flex;align-items:center;gap:9px;margin-bottom:11px}
+.slot .sh .key{font-family:var(--mono);font-size:13px;color:#fff;font-weight:600;letter-spacing:-.01em}
+.slot .sh .bdgs{margin-left:auto;display:flex;gap:6px}
+.bdg{font-family:var(--mono);font-size:9px;letter-spacing:.07em;text-transform:uppercase;padding:3px 7px;border-radius:5px}
+.bdg.src{color:var(--ink-3);background:var(--steel-200);box-shadow:inset 0 0 0 1px var(--hair)}
+.bdg.live{color:var(--green);background:rgba(70,209,138,.1);box-shadow:inset 0 0 0 1px rgba(70,209,138,.22)}
+.bdg.restart{color:var(--amber);background:rgba(255,176,32,.1);box-shadow:inset 0 0 0 1px rgba(255,176,32,.22)}
+.bdg.locked{color:var(--ink-2);background:var(--steel-300);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.inp{display:flex;align-items:center;height:40px;padding:0 13px;border-radius:9px;background:var(--steel-050);box-shadow:inset 0 0 0 1px var(--hair-2);font-family:var(--mono);font-size:13.5px;color:var(--ink)}
+.inp.locked{background:var(--steel-150);color:var(--ink-3);box-shadow:inset 0 0 0 1px var(--hair)}
+.inp .x{margin-left:auto;color:var(--ink-4)}
+.seg{display:flex;height:40px;border-radius:9px;overflow:hidden;background:var(--steel-050);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.seg button{flex:1;border:0;background:transparent;color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;transition:.15s}
+.seg button.on{color:#0a0a0a;background:var(--amber);font-weight:600;box-shadow:0 0 16px var(--amber-glow)}
+.seg button:not(.on):hover{color:var(--ink)}
+.step{display:flex;align-items:center;height:40px;border-radius:9px;background:var(--steel-050);box-shadow:inset 0 0 0 1px var(--hair-2);overflow:hidden}
+.step button{width:42px;height:100%;border:0;background:transparent;color:var(--ink-2);font-size:18px;cursor:pointer;transition:.15s}
+.step button:hover{background:var(--steel-200);color:#fff}
+.step .val{flex:1;text-align:center;font-family:var(--mono);font-size:17px;font-weight:600;color:#fff}
+.hint{margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.slot.lockedF{opacity:.82}.slot.lockedF .key{color:var(--ink-2)}
+.tokenRow{display:flex;align-items:center;gap:12px}
+.tokenMask{flex:1;font-family:var(--mono);letter-spacing:.3em;color:var(--ink-3);font-size:15px}
+.btn{height:36px;padding:0 16px;border-radius:9px;border:0;font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:.12s}
+.btn.ghost{background:var(--steel-200);color:var(--ink);box-shadow:inset 0 0 0 1px var(--hair-2)}.btn.ghost:hover{background:var(--steel-300)}
+.btn.prim{background:var(--amber);color:#0a0a0a;font-weight:600;box-shadow:0 8px 24px -8px var(--amber-glow)}.btn.prim:hover{transform:translateY(-1px)}
+.rackFoot{display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:18px;border-top:1px solid var(--hair)}
+.rackFoot .dirty{font-family:var(--mono);font-size:12px;color:var(--amber)}.rackFoot .sp{flex:1}
+footer{margin-top:60px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+
+@media(max-width:1040px){
+  .panel{grid-template-columns:1fr}
+  .bay{border-right:0;border-bottom:1px solid var(--hair)}
+  .tr{grid-template-columns:50px 1fr 96px}.tr .trBars{display:none}
+  .rack{grid-template-columns:1fr}
+}
+@media(max-width:560px){
+  main{padding:18px 14px 70px}.rail nav{display:none}
+  .cluster{grid-template-columns:1fr}
+  .ln2{grid-template-columns:5px 64px 108px 1fr}.ln2 .lv{display:none}
+  .tr{grid-template-columns:50px 1fr}.tr .trMeta{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="rail">
+  <div class="brand"><span class="sig"></span> <b>plundrio</b> <span class="v">v0.10.13</span></div>
+  <nav><a class="on" href="#">Cluster</a><a href="#">Account</a><a href="#">Logs</a><a href="#">Settings</a></nav>
+  <div class="status"><span class="t num">12:04:52</span><span class="live"><span class="d"></span> STREAM LIVE</span></div>
+</div>
+
+<main>
+
+  <!-- ===================== MASTER PANEL ===================== -->
+  <div class="panel">
+
+    <!-- big gauge: the focal transfer -->
+    <div class="bay">
+      <div class="bayHead"><span class="chip">▸ local download</span><span class="cat">tv</span></div>
+      <div class="bayName">The.Expanse.S05E07.2160p.WEB.H265-GLHF</div>
+      <div class="baySub">4.0 GB · 5 files · added 6m ago</div>
+
+      <div class="gauge">
+        <svg viewBox="0 0 200 200">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1c4d74"/><stop offset="1" stop-color="#6ec1ff"/></linearGradient>
+            <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a4e00"/><stop offset="1" stop-color="#ffb020"/></linearGradient>
+          </defs>
+          <!-- 270deg arc, r=84, circumference of 3/4 circle = 2*pi*84*0.75 = 395.8 -->
+          <circle class="track" cx="100" cy="100" r="84" stroke-dasharray="395.8 527.8"></circle>
+          <!-- arc1: put.io 0->50% combined = first half of the 270 arc = 197.9 length, full because fetch done -->
+          <circle class="arc1" cx="100" cy="100" r="84" stroke-dasharray="197.9 527.8"></circle>
+          <!-- arc2: local fills second half; combined 71% means 21% past mid -> 21/50*197.9=83.1, offset by -197.9 to start at mid -->
+          <circle class="arc2" cx="100" cy="100" r="84" stroke-dasharray="83.1 527.8" stroke-dashoffset="-197.9"></circle>
+          <!-- midmark at 50% (12 o'clock once rotated) -->
+          <g class="ticks">
+            <line x1="100" y1="8" x2="100" y2="22" class="midmark"/>
+          </g>
+        </svg>
+        <div class="dial">
+          <div class="big num">71<sup>%</sup></div>
+          <div class="lab">combined</div>
+          <div class="rate num"><span class="arr">↓</span> 8.4 MB/s</div>
+        </div>
+        <div class="tip"></div>
+      </div>
+
+      <div class="legend">
+        <div class="lg p1 muted"><div class="k"><i></i> put.io fetch</div><div class="v"><b>100%</b> · 4.0 GB</div></div>
+        <div class="lg p2"><div class="k"><i></i> local download</div><div class="v"><b>3/5</b> files · ETA 0:54</div></div>
+      </div>
+    </div>
+
+    <!-- account instrument cluster -->
+    <div class="cluster">
+      <div class="gid">
+        <div class="av">d</div>
+        <div class="who">doodla<small>put.io account</small></div>
+        <div class="plan">unlimited</div>
+      </div>
+      <div class="inst"><div class="lab">active transfers</div><div class="read num">2</div><div class="sub">1 queued · 0 stalled</div></div>
+      <div class="inst"><div class="lab">aggregate ↓</div><div class="read num">28.4<span class="u">MB/s</span></div><div class="sub">put.io 5.0 · local 19.6 · …</div></div>
+      <div class="inst disk">
+        <div class="lab">put.io disk</div>
+        <div class="diskBar"><div class="ticks"></div><i></i></div>
+        <div class="diskLegend"><span>used <b>684.0 GB</b> · 66.8%</span><span>free <b>339.6 GB</b> of 1.0 TB</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== FLEET STRIP ===================== -->
+  <section>
+    <div class="eyebrow"><h2>Transfer Strip</h2><div class="ln"></div><div class="meta"><b>5</b> tracked · 2 active</div></div>
+    <div class="strip">
+
+      <!-- put.io-fetching: combined 31% -->
+      <div class="tr">
+        <div class="mini"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24" stroke-dasharray="113.1 150.8"/><circle class="a1" cx="30" cy="30" r="24" stroke-dasharray="70.1 150.8"/></svg><span class="pc num">31</span></div>
+        <div class="trN"><div class="nm">Dune.Part.Two.2024.2160p.UHD.BluRay.x265-TERMINAL</div><div class="st"><span class="d fetch"></span> fetching at put.io · 62% fetched</div></div>
+        <div class="trBars">
+          <div class="lab"><span>put.io</span><span>62%</span></div><div class="b p1"><i style="width:62%"></i></div>
+          <div class="lab"><span>local</span><span>—</span></div><div class="b p2"><i style="width:0"></i></div>
+        </div>
+        <div class="trMeta"><b>↓ 5.0 MB/s</b>ETA 2:00</div>
+      </div>
+
+      <!-- local-downloading: combined 88% -->
+      <div class="tr">
+        <div class="mini"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24" stroke-dasharray="113.1 150.8"/><circle class="a1" cx="30" cy="30" r="24" stroke-dasharray="56.5 150.8"/><circle class="a2" cx="30" cy="30" r="24" stroke-dasharray="43 150.8" stroke-dashoffset="-56.5"/></svg><span class="pc num">88</span></div>
+        <div class="trN"><div class="nm">Severance.S02E03.1080p.WEB.h264-ETHEL</div><div class="st"><span class="d local"></span> downloading locally · 3/4 files</div></div>
+        <div class="trBars">
+          <div class="lab"><span>put.io</span><span>100%</span></div><div class="b p1"><i style="width:100%;opacity:.5"></i></div>
+          <div class="lab"><span>local</span><span>76%</span></div><div class="b p2"><i style="width:76%"></i></div>
+        </div>
+        <div class="trMeta"><b>↓ 11.2 MB/s</b>ETA 0:38</div>
+      </div>
+
+      <!-- queued -->
+      <div class="tr queued">
+        <div class="mini"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24" stroke-dasharray="113.1 150.8"/></svg><span class="pc num" style="color:var(--ink-3)">0</span></div>
+        <div class="trN"><div class="nm">Foundation.S03E10.2160p.ATVP.WEB-DL.H7b</div><div class="st"><span class="d queued"></span> queued · waiting for put.io</div></div>
+        <div class="trBars">
+          <div class="lab"><span>put.io</span><span>—</span></div><div class="b p1"><i style="width:0"></i></div>
+          <div class="lab"><span>local</span><span>—</span></div><div class="b p2"><i style="width:0"></i></div>
+        </div>
+        <div class="trMeta"><b>2.4 GB</b>in queue</div>
+      </div>
+
+      <!-- completed -->
+      <div class="tr">
+        <div class="mini"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24" stroke-dasharray="113.1 150.8"/><circle class="a1" cx="30" cy="30" r="24" stroke-dasharray="56.5 150.8" style="stroke:var(--green)"/><circle class="a2" cx="30" cy="30" r="24" stroke-dasharray="56.5 150.8" stroke-dashoffset="-56.5" style="stroke:var(--green)"/></svg><span class="pc num" style="color:var(--green)">100</span></div>
+        <div class="trN"><div class="nm">Andor.S02E05.1080p.WEB.h264-FLUX</div><div class="st"><span class="d done"></span> completed · source cleaned · 4/4 files</div></div>
+        <div class="trBars">
+          <div class="lab"><span>put.io</span><span>100%</span></div><div class="b p1"><i style="width:100%;opacity:.45"></i></div>
+          <div class="lab"><span>local</span><span>100%</span></div><div class="b p2"><i style="width:100%;background:var(--green);box-shadow:none"></i></div>
+        </div>
+        <div class="trMeta"><b style="color:var(--green)">done</b>5m ago</div>
+      </div>
+
+      <!-- failed/permanent -->
+      <div class="tr fail">
+        <div class="mini"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24" stroke-dasharray="113.1 150.8"/><circle class="a1" cx="30" cy="30" r="24" stroke-dasharray="56.5 150.8"/><circle class="a2" cx="30" cy="30" r="24" stroke-dasharray="11 150.8" stroke-dashoffset="-56.5"/></svg><span class="pc num" style="color:#ff9b94">32</span></div>
+        <div class="trN"><div class="nm">Murderbot.S01E04.WEB.x264-NHTFS</div><div class="st"><span class="d fail"></span> failed · gave up after retries</div></div>
+        <div class="trBars">
+          <div class="lab"><span>put.io</span><span>100%</span></div><div class="b p1"><i style="width:100%;background:var(--red);opacity:.5"></i></div>
+          <div class="lab"><span>local</span><span>14%</span></div><div class="b p2"><i style="width:14%;background:var(--red);box-shadow:none"></i></div>
+        </div>
+        <div class="trMeta"><b style="color:#ff9b94">frozen</b>5 retries</div>
+        <div class="failBar"><span class="pb">permanent</span> local download failed: open /downloads/Murderbot…: no space left on device</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== LOG CONSOLE ===================== -->
+  <section style="margin-top:42px">
+    <div class="eyebrow"><h2>Console</h2><div class="ln"></div><div class="meta">component: <b>transfers</b></div></div>
+    <div class="console">
+      <div class="cHead">
+        <span class="lvl">debug</span><span class="lvl on">info</span><span class="lvl on">warn</span><span class="lvl on">error</span>
+        <span class="auto"><span class="d"></span> tail · autoscroll</span>
+      </div>
+      <div class="cBody">
+        <div class="ln2 info"><span class="bar"></span><span class="ts num">12:04:51</span><span class="lv">info</span><span class="co">transfers</span><span class="msg"><b>Found ready transfer</b> <span class="f">id=8821 name=The.Expanse.S05E07</span></span></div>
+        <div class="ln2 info"><span class="bar"></span><span class="ts num">12:04:50</span><span class="lv">info</span><span class="co">download</span><span class="msg"><b>worker 2 picked job</b> <span class="f">file=…S05E07.mkv size=1.4G</span></span></div>
+        <div class="ln2 debug"><span class="bar"></span><span class="ts num">12:04:48</span><span class="lv">debug</span><span class="co">api</span><span class="msg"><b>transfer 8821 DOWNLOADING</b> <span class="f">putio_pct=84</span></span></div>
+        <div class="ln2 info fresh"><span class="bar"></span><span class="ts num">12:04:47</span><span class="lv">info</span><span class="co">coordinator</span><span class="msg"><b>state Downloading</b> <span class="f">id=8821 files=3/5</span></span></div>
+        <div class="ln2 warn"><span class="bar"></span><span class="ts num">12:04:45</span><span class="lv">warn</span><span class="co">download</span><span class="msg"><b>retrying after transient error</b> <span class="f">file=…E03.mkv attempt=2/5</span></span></div>
+        <div class="ln2 info"><span class="bar"></span><span class="ts num">12:04:41</span><span class="lv">info</span><span class="co">transfers</span><span class="msg"><b>put.io fetch complete</b> <span class="f">id=8821 size=4.0G</span></span></div>
+        <div class="ln2 error"><span class="bar"></span><span class="ts num">12:04:38</span><span class="lv">error</span><span class="co">download</span><span class="msg"><b>permanent failure, giving up</b> <span class="f">id=7740 err=no space left on device</span></span></div>
+        <div class="ln2 info"><span class="bar"></span><span class="ts num">12:04:33</span><span class="lv">info</span><span class="co">cleanup</span><span class="msg"><b>deleted put.io source</b> <span class="f">id=7651 name=Andor.S02E05</span></span></div>
+        <div class="ln2 debug"><span class="bar"></span><span class="ts num">12:04:29</span><span class="lv">debug</span><span class="co">api</span><span class="msg"><b>quota refreshed</b> <span class="f">used=66.8% avail=339.6G</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SETTINGS RACK ===================== -->
+  <section style="margin-top:42px">
+    <div class="eyebrow"><h2>Settings Rack</h2><div class="ln"></div><div class="meta"><b>1</b> pending</div></div>
+    <div class="rack">
+      <div class="slot">
+        <div class="sh"><span class="key">log_level</span><span class="bdgs"><span class="bdg src">default</span><span class="bdg live">live</span></span></div>
+        <div class="seg"><button>debug</button><button class="on">info</button><button>warn</button><button>error</button><button>fatal</button><button>none</button></div>
+        <div class="hint">applies immediately · widens/narrows the live stream above</div>
+      </div>
+      <div class="slot">
+        <div class="sh"><span class="key">workers</span><span class="bdgs"><span class="bdg src">file</span><span class="bdg live">live</span></span></div>
+        <div class="step"><button>−</button><span class="val num">4</span><button>+</button></div>
+        <div class="hint">concurrent local downloads · shrink retires as jobs finish</div>
+      </div>
+      <div class="slot lockedF">
+        <div class="sh"><span class="key">target</span><span class="bdgs"><span class="bdg src">env</span><span class="bdg locked">locked</span><span class="bdg restart">restart</span></span></div>
+        <div class="inp locked">/downloads <span class="x">🔒</span></div>
+        <div class="hint">pinned by PLDR_TARGET · daemon can't rewrite compose</div>
+      </div>
+      <div class="slot">
+        <div class="sh"><span class="key">folder</span><span class="bdgs"><span class="bdg src">flag</span><span class="bdg restart">restart</span></span></div>
+        <div class="inp">plundrio <span class="x">▾</span></div>
+        <div class="hint">put.io folder · restart required to re-scope</div>
+      </div>
+      <div class="slot">
+        <div class="sh"><span class="key">listen</span><span class="bdgs"><span class="bdg src">default</span><span class="bdg restart">restart</span></span></div>
+        <div class="inp">:9091</div>
+        <div class="hint">Transmission RPC bind</div>
+      </div>
+      <div class="slot">
+        <div class="sh"><span class="key">dashboard_listen</span><span class="bdgs"><span class="bdg src">file</span><span class="bdg restart">restart</span></span></div>
+        <div class="inp">:9092</div>
+        <div class="hint">this dashboard's bind</div>
+      </div>
+      <div class="slot wide lockedF">
+        <div class="sh"><span class="key">token</span><span class="bdgs"><span class="bdg src">env</span><span class="bdg locked">locked</span></span></div>
+        <div class="tokenRow"><span class="tokenMask">•••••••••••••••••••• set</span><button class="btn ghost">Replace token…</button></div>
+        <div class="hint">pinned by PLDR_TOKEN · value never read back, only replaced</div>
+      </div>
+    </div>
+    <div class="rackFoot"><span class="dirty">● log_level pending</span><span class="sp"></span><button class="btn ghost">Discard</button><button class="btn prim">Save changes</button></div>
+  </section>
+
+  <footer>plundrio · put.io ⇄ *arr bridge · all values seeded for preview</footer>
+</main>
+</body>
+</html>

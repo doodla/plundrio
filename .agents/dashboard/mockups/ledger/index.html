@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plundrio · ledger</title>
+<style>
+/* ============================================================================
+   DIRECTION: ledger
+   A printed manifest, set in type — not a screen full of cards. Heavy editorial
+   hierarchy: huge tabular numerals, hairline rules, a single oxblood accent on
+   warm bone. The two-phase progress is a SUBSTANTIAL "baton" — a thick handoff
+   track with a physical relay capsule that sits at the put.io→local seam; ink
+   fills the put.io leg, oxblood fills the local leg, and the capsule rides the
+   boundary. Combined % set enormous beside it. The whole page reads top-to-bottom
+   like a document, with the focal transfer as the masthead.
+   ============================================================================ */
+
+:root{
+  /* committed WARM neutral ramp — bone/paper, not slate */
+  --paper:#f4f0e8;
+  --paper-2:#efeae0;
+  --card:#fbf8f2;
+  --card-2:#f7f2e9;
+  --line:#e0d8c8;
+  --line-2:#d2c8b4;
+  --rule:#1a1714;
+
+  --ink:#1a1714;          /* near-black warm ink */
+  --ink-2:#4a443c;
+  --ink-3:#7a7164;
+  --ink-4:#a89e8c;
+
+  /* committed accent: oxblood, for the local/landed phase + key actions */
+  --ox:#9c2b2b;
+  --ox-deep:#6e1c1c;
+  --ox-soft:#c45151;
+  --ox-wash:#f4e3df;
+  /* put.io leg = ink itself (the manifest stays monochrome until oxblood marks "yours, locally") */
+  --putio:#2a2620;
+  --green:#3f7d3f;
+  --amber:#9a6a16;
+
+  --serif:"Spectral","Iowan Old Style",Georgia,"Times New Roman",serif;
+  --sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1100px 500px at 50% -5%, rgba(156,43,43,.035), transparent 60%),
+    var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* masthead bar */
+.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:20px;height:60px;padding:0 30px;
+  background:rgba(244,240,232,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line-2)}
+.brand{display:flex;align-items:baseline;gap:11px}
+.brand .mk{width:13px;height:13px;border-radius:3px;background:var(--ox);box-shadow:0 0 0 3px var(--ox-wash);position:relative;align-self:center}
+.brand .mk::after{content:"";position:absolute;inset:3px;border-radius:1px;background:var(--paper)}
+.brand b{font-family:var(--serif);font-size:19px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
+.brand .v{font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+.top nav{display:flex;gap:4px;margin-left:14px}
+.top nav a{font-family:var(--sans);color:var(--ink-3);text-decoration:none;font-size:13px;padding:7px 13px;border-radius:8px;transition:.15s}
+.top nav a.on{color:var(--ink);background:var(--card);box-shadow:inset 0 0 0 1px var(--line-2)}
+.top nav a:hover{color:var(--ink)}
+.top .live{margin-left:auto;display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);
+  padding:6px 13px;border-radius:999px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line-2)}
+.top .live .d{width:7px;height:7px;border-radius:50%;background:var(--ox);box-shadow:0 0 0 3px var(--ox-wash);animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.35}}
+
+main{max-width:1180px;margin:0 auto;padding:0 30px 100px}
+
+/* page header — like a document title block */
+.docHead{padding:46px 0 30px;border-bottom:2px solid var(--rule);margin-bottom:0;display:flex;align-items:flex-end;justify-content:space-between;gap:30px}
+.docHead .ttl{font-family:var(--serif);font-size:13px;letter-spacing:.04em}
+.docHead h1{font-family:var(--serif);font-size:44px;font-weight:600;letter-spacing:-.025em;line-height:1;margin:8px 0 0}
+.docHead .sub{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:10px}
+.docHead .acct{text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.docHead .acct .big{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.03em;color:var(--ink);display:block;margin-bottom:2px}
+.docHead .acct b{color:var(--ox)}
+
+/* section label as a running-head */
+.sect{margin-top:54px}
+.runhead{display:flex;align-items:baseline;gap:16px;padding-bottom:11px;border-bottom:1px solid var(--rule);margin-bottom:0}
+.runhead .no{font-family:var(--mono);font-size:12px;color:var(--ox);font-weight:600}
+.runhead h2{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
+.runhead .meta{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.runhead .meta b{color:var(--ink)}
+
+/* ============ ACCOUNT BAND (in the doc head + a thin quota ribbon) ============ */
+.quotaRibbon{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:center;padding:20px 0;border-bottom:1px solid var(--line-2)}
+.quotaRibbon .who{display:flex;align-items:center;gap:13px}
+.quotaRibbon .av{width:42px;height:42px;border-radius:11px;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-family:var(--serif);font-weight:600;font-size:19px}
+.quotaRibbon .who .nm{font-family:var(--serif);font-size:17px;font-weight:600}.quotaRibbon .who .nm small{display:block;font-family:var(--mono);font-size:11px;color:var(--ink-3);font-weight:400}
+.qmeter{position:relative}
+.qmeter .scale{height:22px;border-radius:6px;background:var(--paper-2);box-shadow:inset 0 0 0 1px var(--line-2);overflow:hidden;position:relative}
+.qmeter .scale i{display:block;height:100%;width:66.8%;background:repeating-linear-gradient(135deg,var(--ink) 0 7px,#2c2620 7px 9px)}
+.qmeter .scale .danger{position:absolute;left:95%;top:0;bottom:0;width:1px;background:var(--ox)}
+.qmeter .legend{display:flex;justify-content:space-between;margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.qmeter .legend b{color:var(--ink)}
+.quotaRibbon .free{text-align:right}
+.quotaRibbon .free .n{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1}
+.quotaRibbon .free .l{font-family:var(--mono);font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em;margin-top:4px}
+
+/* ============ FOCAL ENTRY (the masthead transfer) ============ */
+.focal{padding:30px 0 26px;border-bottom:1px solid var(--line-2)}
+.focalTop{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:6px;
+  color:var(--ox);background:var(--ox-wash);box-shadow:inset 0 0 0 1px rgba(156,43,43,.2)}
+.cat{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:3px 9px;border-radius:6px;background:var(--card-2);box-shadow:inset 0 0 0 1px var(--line)}
+.focalName{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.12;margin:6px 0 4px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.focalSub{font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}
+
+.focalGrid{display:grid;grid-template-columns:1fr 230px;gap:36px;align-items:center;margin-top:24px}
+
+/* THE BATON — the signature two-phase track */
+.baton{position:relative;padding-top:30px}
+.batonLabels{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.batonLabels .a{color:var(--ink-3)}.batonLabels .seam{color:var(--ink-4)}.batonLabels .b{color:var(--ox)}
+.batonTrack{position:relative;height:26px;border-radius:7px;background:var(--paper-2);box-shadow:inset 0 0 0 1px var(--line-2),inset 0 2px 5px rgba(0,0,0,.05);overflow:hidden}
+/* put.io leg fills with ink hatch */
+.batonTrack .leg1{position:absolute;left:0;top:0;bottom:0;background:var(--putio);border-radius:7px 0 0 7px}
+.batonTrack .leg1::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,transparent 0 8px,rgba(255,255,255,.06) 8px 10px)}
+/* local leg fills oxblood with a moving sheen */
+.batonTrack .leg2{position:absolute;left:50%;top:0;bottom:0;background:linear-gradient(90deg,var(--ox-deep),var(--ox));overflow:hidden}
+.batonTrack .leg2 .sheen{position:absolute;top:0;bottom:0;width:60px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);animation:slide 1.9s linear infinite}
+@keyframes slide{0%{left:-60px}100%{left:130%}}
+/* 50% seam tick */
+.batonTrack .seamLine{position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--paper);z-index:4;transform:translateX(-1px)}
+/* the relay capsule that rides the leading edge of the active leg */
+.capsule{position:absolute;top:50%;left:71%;transform:translate(-50%,-50%);z-index:6;
+  width:30px;height:30px;border-radius:50%;background:var(--paper);box-shadow:0 3px 10px rgba(0,0,0,.22),0 0 0 1px var(--line-2);
+  display:grid;place-items:center;animation:bob 2.4s ease-in-out infinite}
+.capsule::after{content:"";width:13px;height:13px;border-radius:50%;background:var(--ox);box-shadow:0 0 12px rgba(156,43,43,.5)}
+@keyframes bob{0%,100%{transform:translate(-50%,-50%)}50%{transform:translate(-50%,-58%)}}
+.batonFoot{display:flex;justify-content:space-between;margin-top:11px;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.batonFoot .seg{display:flex;gap:7px;align-items:center}
+.batonFoot .seg.muted{opacity:.55}
+.batonFoot b{color:var(--ink)}
+.batonFoot .seg.b b{color:var(--ox)}
+
+/* the enormous combined numeral */
+.bignum{text-align:right}
+.bignum .n{font-family:var(--mono);font-size:96px;font-weight:600;letter-spacing:-.06em;line-height:.78;color:var(--ink)}
+.bignum .n sup{font-family:var(--mono);font-size:30px;color:var(--ink-3);vertical-align:super}
+.bignum .rate{font-family:var(--mono);font-size:15px;color:var(--ox);margin-top:8px}
+.bignum .lab{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);margin-top:2px}
+
+/* ============ TRANSFER MANIFEST (the list as a typeset table) ============ */
+.manifest{margin-top:0}
+.mrow{display:grid;grid-template-columns:30px 1fr 280px 110px;gap:22px;align-items:center;padding:18px 0;border-bottom:1px solid var(--line-2)}
+.mrow:hover{background:var(--card-2)}
+.mrow .idx{font-family:var(--mono);font-size:12px;color:var(--ink-4)}
+.mrow .mn{min-width:0}
+.mrow .mn .nm{font-family:var(--serif);font-size:17px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow .mn .st{display:flex;align-items:center;gap:8px;margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.mrow .mn .st .d{width:6px;height:6px;border-radius:50%}
+.d.fetch{background:var(--ink);box-shadow:0 0 0 3px rgba(26,23,20,.08);animation:beat 1.6s ease-in-out infinite}
+.d.local{background:var(--ox);box-shadow:0 0 0 3px var(--ox-wash);animation:beat 1.6s ease-in-out infinite}
+.d.queued{background:var(--ink-4)}.d.done{background:var(--green)}.d.fail{background:var(--ox);box-shadow:0 0 0 3px var(--ox-wash)}
+/* compact baton for the manifest rows */
+.mbat{position:relative;height:12px;border-radius:5px;background:var(--paper-2);box-shadow:inset 0 0 0 1px var(--line-2);overflow:hidden}
+.mbat .seamLine{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--paper);z-index:4}
+.mbat .l1{position:absolute;left:0;top:0;bottom:0;background:var(--putio)}
+.mbat .l1.muted{opacity:.32}
+.mbat .l2{position:absolute;left:50%;top:0;bottom:0;background:linear-gradient(90deg,var(--ox-deep),var(--ox))}
+.mbat .cap{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--paper);box-shadow:0 1px 5px rgba(0,0,0,.2),0 0 0 1px var(--line-2);transform:translate(-50%,-50%);z-index:6;display:grid;place-items:center}
+.mbat .cap::after{content:"";width:6px;height:6px;border-radius:50%;background:var(--ox)}
+.mrow .mp{text-align:right;font-family:var(--mono)}
+.mrow .mp .pp{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.mrow .mp .ps{font-size:11px;color:var(--ink-3);margin-top:3px}
+.mrow .mp .ps.ox{color:var(--ox)}
+.mrow.queued{opacity:.7}
+.mrow.fail{background:var(--ox-wash)}
+.mrow.fail .mbat .l1,.mrow.fail .mbat .l2{background:var(--ox-soft)}
+.failNote{grid-column:2/-1;margin-top:8px;display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11.5px;color:var(--ox-deep)}
+.failNote .pb{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--paper);background:var(--ox);padding:2px 7px;border-radius:4px}
+
+/* ============ LOG — set as a typeset record, but in a dark inset for contrast ============ */
+.record{margin-top:0;border-radius:12px;overflow:hidden;border:1px solid var(--line-2);background:#15120f}
+.recHead{display:flex;align-items:center;gap:9px;padding:12px 18px;background:#1c1814;border-bottom:1px solid rgba(255,255,255,.06)}
+.lvl{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:6px;color:#9b9082;background:#262019;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.lvl.on{color:#f4f0e8;background:#352c22;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.recHead .auto{margin-left:auto;display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:#9b9082}
+.recHead .auto .d{width:6px;height:6px;border-radius:50%;background:var(--ox-soft);box-shadow:0 0 7px rgba(196,81,81,.5);animation:beat 2s ease-in-out infinite}
+.recBody{font-family:var(--mono);font-size:12.5px;line-height:1.95;padding:9px 0;max-height:320px;overflow:hidden;color:#cabfae}
+.rl{display:grid;grid-template-columns:78px 56px 110px 1fr;gap:14px;padding:1px 18px;align-items:baseline}
+.rl:hover{background:rgba(255,255,255,.025)}
+.rl.fresh{animation:flash 1s ease-out}
+@keyframes flash{0%{background:rgba(196,81,81,.14)}100%{background:transparent}}
+.rl .t{color:#6e6456}.rl .l{text-transform:uppercase;font-size:10px;letter-spacing:.05em}
+.rl .l.debug{color:#8a8073}.rl .l.info{color:#cabfae}.rl .l.warn{color:#caa24a}.rl .l.error{color:var(--ox-soft)}
+.rl .c{color:#c98b8b}.rl .m{color:#cabfae;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rl .m b{color:#efe7d8;font-weight:400}.rl .m .f{color:#6e6456}
+
+/* ============ SETTINGS — a form set like a printed register ============ */
+.register{margin-top:0}
+.reg{display:grid;grid-template-columns:200px 1fr 320px;gap:24px;align-items:center;padding:20px 0;border-bottom:1px solid var(--line-2)}
+.reg .key{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+.reg .key .badges{display:flex;gap:6px;margin-top:8px}
+.bdg{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:5px}
+.bdg.src{color:var(--ink-3);background:var(--card-2);box-shadow:inset 0 0 0 1px var(--line)}
+.bdg.live{color:var(--green);background:#e6efe2;box-shadow:inset 0 0 0 1px #bcd6b4}
+.bdg.restart{color:var(--amber);background:#f1e8d2;box-shadow:inset 0 0 0 1px #ddca9a}
+.bdg.locked{color:var(--ink-2);background:var(--paper-2);box-shadow:inset 0 0 0 1px var(--line-2)}
+.reg .desc{font-family:var(--sans);font-size:12.5px;color:var(--ink-3);line-height:1.5}
+.reg .ctrl{}
+.inp{display:flex;align-items:center;height:40px;padding:0 13px;border-radius:9px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line-2);font-family:var(--mono);font-size:13.5px;color:var(--ink)}
+.inp.locked{background:var(--paper-2);color:var(--ink-3)}
+.inp .x{margin-left:auto;color:var(--ink-4)}
+.seg{display:flex;height:40px;border-radius:9px;overflow:hidden;background:var(--card);box-shadow:inset 0 0 0 1px var(--line-2)}
+.seg button{flex:1;border:0;background:transparent;color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;transition:.15s}
+.seg button.on{color:var(--paper);background:var(--ox);font-weight:600}
+.seg button:not(.on):hover{color:var(--ink);background:var(--card-2)}
+.step{display:flex;align-items:center;height:40px;border-radius:9px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line-2);overflow:hidden;width:150px}
+.step button{width:44px;height:100%;border:0;background:transparent;color:var(--ink-2);font-size:18px;cursor:pointer;transition:.15s}
+.step button:hover{background:var(--card-2);color:var(--ink)}
+.step .val{flex:1;text-align:center;font-family:var(--mono);font-size:17px;font-weight:600;color:var(--ink)}
+.tokenRow{display:flex;align-items:center;gap:12px}
+.tokenMask{flex:1;font-family:var(--mono);letter-spacing:.3em;color:var(--ink-3);font-size:15px}
+.btn{height:36px;padding:0 16px;border-radius:9px;border:0;font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:.12s}
+.btn.ghost{background:var(--card);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}.btn.ghost:hover{background:var(--card-2)}
+.btn.prim{background:var(--ox);color:var(--paper);font-weight:600;box-shadow:0 8px 22px -10px rgba(156,43,43,.5)}.btn.prim:hover{background:var(--ox-deep);transform:translateY(-1px)}
+.regFoot{display:flex;align-items:center;gap:14px;margin-top:22px}
+.regFoot .dirty{font-family:var(--mono);font-size:12px;color:var(--amber)}.regFoot .sp{flex:1}
+footer{margin-top:64px;padding-top:24px;border-top:2px solid var(--rule);text-align:center;font-family:var(--mono);font-size:11px;color:var(--ink-4)}
+
+@media(max-width:920px){
+  .focalGrid{grid-template-columns:1fr}
+  .bignum{text-align:left}.bignum .n{font-size:72px}
+  .quotaRibbon{grid-template-columns:1fr;gap:14px}
+  .mrow{grid-template-columns:30px 1fr 110px}.mrow .mbat,.batonLabels{display:none}.mrow .mbat-wrap{display:none}
+  .reg{grid-template-columns:1fr;gap:10px}.reg .desc{display:none}
+}
+@media(max-width:560px){
+  main{padding:0 16px 70px}.top nav{display:none}
+  .docHead{flex-direction:column;align-items:flex-start;gap:14px}.docHead h1{font-size:34px}
+  .rl{grid-template-columns:64px 110px 1fr}.rl .l{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand"><span class="mk"></span> <b>plundrio</b> <span class="v">v0.10.13</span></div>
+  <nav><a class="on" href="#">Manifest</a><a href="#">Account</a><a href="#">Record</a><a href="#">Register</a></nav>
+  <div class="live"><span class="d"></span> stream live · 28.4 MB/s</div>
+</div>
+
+<main>
+
+  <!-- ===================== DOC HEAD ===================== -->
+  <div class="docHead">
+    <div>
+      <div class="ttl">put.io ⇄ *arr</div>
+      <h1>Transfer Manifest</h1>
+      <div class="sub">folder “plundrio” · 5 tracked · 2 active · refreshed 12:04:52</div>
+    </div>
+    <div class="acct">
+      <span class="big num">28.4 MB/s</span>
+      aggregate ↓ · <b>2 active</b> · 1 queued
+    </div>
+  </div>
+
+  <!-- account quota ribbon -->
+  <div class="quotaRibbon">
+    <div class="who"><div class="av">d</div><div class="nm">doodla<small>put.io · unlimited</small></div></div>
+    <div class="qmeter">
+      <div class="scale"><i></i><span class="danger"></span></div>
+      <div class="legend"><span>used <b>684.0 GB</b> · 66.8%</span><span>danger line 95%</span><span>of <b>1.0 TB</b></span></div>
+    </div>
+    <div class="free"><div class="n num">339.6<span style="font-size:14px;color:var(--ink-3)"> GB</span></div><div class="l">free</div></div>
+  </div>
+
+  <!-- ===================== FOCAL ENTRY ===================== -->
+  <div class="focal">
+    <div class="focalTop"><span class="tag">▸ landing locally</span><span class="cat">tv</span></div>
+    <div class="focalName">The.Expanse.S05E07.2160p.WEB.H265-GLHF</div>
+    <div class="focalSub">4.0 GB · 5 files · added 6m ago · put.io id 8821</div>
+
+    <div class="focalGrid">
+      <div class="baton">
+        <div class="batonLabels"><span class="a">put.io fetch</span><span class="seam">handoff · 50%</span><span class="b">local download</span></div>
+        <div class="batonTrack">
+          <div class="leg1" style="width:50%"></div>
+          <div class="seamLine"></div>
+          <div class="leg2" style="width:21%"><div class="sheen"></div></div>
+          <div class="capsule"></div>
+        </div>
+        <div class="batonFoot">
+          <span class="seg muted">put.io · <b>100%</b> · 4.0 GB</span>
+          <span class="seg b">local · <b>3/5 files</b> · ETA 0:54</span>
+        </div>
+      </div>
+      <div class="bignum">
+        <div class="n num">71<sup>%</sup></div>
+        <div class="rate num">↓ 8.4 MB/s</div>
+        <div class="lab">combined</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MANIFEST ===================== -->
+  <section class="sect">
+    <div class="runhead"><span class="no">01</span><h2>Manifest</h2><span class="meta"><b>5</b> entries · 2 in motion</span></div>
+    <div class="manifest">
+
+      <!-- put.io-fetching: combined 31% -->
+      <div class="mrow">
+        <div class="idx num">02</div>
+        <div class="mn"><div class="nm">Dune.Part.Two.2024.2160p.UHD.BluRay.x265-TERMINAL</div>
+          <div class="st"><span class="d fetch"></span> fetching at put.io · 62% fetched · ↓ 5.0 MB/s · ETA 2:00</div></div>
+        <div class="mbat-wrap"><div class="mbat"><div class="l1" style="width:31%"></div><div class="seamLine"></div><div class="cap" style="left:31%"></div></div></div>
+        <div class="mp"><div class="pp num">31<span style="font-size:12px;color:var(--ink-3)">%</span></div><div class="ps">in put.io</div></div>
+      </div>
+
+      <!-- local-downloading: combined 88% -->
+      <div class="mrow">
+        <div class="idx num">03</div>
+        <div class="mn"><div class="nm">Severance.S02E03.1080p.WEB.h264-ETHEL</div>
+          <div class="st"><span class="d local"></span> downloading locally · 3/4 files · ↓ 11.2 MB/s · ETA 0:38</div></div>
+        <div class="mbat-wrap"><div class="mbat"><div class="l1 muted" style="width:50%"></div><div class="seamLine"></div><div class="l2" style="width:38%"></div><div class="cap" style="left:88%"></div></div></div>
+        <div class="mp"><div class="pp num" style="color:var(--ox)">88<span style="font-size:12px;color:var(--ink-3)">%</span></div><div class="ps ox">on disk</div></div>
+      </div>
+
+      <!-- queued -->
+      <div class="mrow queued">
+        <div class="idx num">04</div>
+        <div class="mn"><div class="nm">Foundation.S03E10.2160p.ATVP.WEB-DL.H7b</div>
+          <div class="st"><span class="d queued"></span> queued · waiting for put.io · 2.4 GB</div></div>
+        <div class="mbat-wrap"><div class="mbat"><div class="seamLine"></div></div></div>
+        <div class="mp"><div class="pp num" style="color:var(--ink-4)">0<span style="font-size:12px">%</span></div><div class="ps">queued</div></div>
+      </div>
+
+      <!-- completed -->
+      <div class="mrow">
+        <div class="idx num">05</div>
+        <div class="mn"><div class="nm">Andor.S02E05.1080p.WEB.h264-FLUX</div>
+          <div class="st"><span class="d done"></span> completed · source cleaned · 4/4 files · 5m ago</div></div>
+        <div class="mbat-wrap"><div class="mbat"><div class="l1 muted" style="width:50%"></div><div class="seamLine"></div><div class="l2" style="width:50%;background:var(--green)"></div></div></div>
+        <div class="mp"><div class="pp num" style="color:var(--green)">100<span style="font-size:12px;color:var(--ink-3)">%</span></div><div class="ps">done</div></div>
+      </div>
+
+      <!-- failed/permanent -->
+      <div class="mrow fail">
+        <div class="idx num">06</div>
+        <div class="mn"><div class="nm">Murderbot.S01E04.WEB.x264-NHTFS</div>
+          <div class="st"><span class="d fail"></span> failed · gave up after 5 retries · frozen at 32%</div>
+          <div class="failNote"><span class="pb">permanent</span> local download failed: open /downloads/Murderbot…: no space left on device</div></div>
+        <div class="mbat-wrap"><div class="mbat"><div class="l1" style="width:50%"></div><div class="seamLine"></div><div class="l2" style="width:14%"></div></div></div>
+        <div class="mp"><div class="pp num" style="color:var(--ox-deep)">32<span style="font-size:12px">%</span></div><div class="ps">frozen</div></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== RECORD (logs) ===================== -->
+  <section class="sect">
+    <div class="runhead"><span class="no">02</span><h2>Record</h2><span class="meta">component: <b>transfers</b></span></div>
+    <div class="record" style="margin-top:18px">
+      <div class="recHead">
+        <span class="lvl">debug</span><span class="lvl on">info</span><span class="lvl on">warn</span><span class="lvl on">error</span>
+        <span class="auto"><span class="d"></span> tail · autoscroll</span>
+      </div>
+      <div class="recBody">
+        <div class="rl"><span class="t num">12:04:51</span><span class="l info">info</span><span class="c">transfers</span><span class="m"><b>Found ready transfer</b> <span class="f">id=8821 name=The.Expanse.S05E07</span></span></div>
+        <div class="rl"><span class="t num">12:04:50</span><span class="l info">info</span><span class="c">download</span><span class="m"><b>worker 2 picked job</b> <span class="f">file=…S05E07.mkv size=1.4G</span></span></div>
+        <div class="rl"><span class="t num">12:04:48</span><span class="l debug">debug</span><span class="c">api</span><span class="m"><b>transfer 8821 DOWNLOADING</b> <span class="f">putio_pct=84</span></span></div>
+        <div class="rl fresh"><span class="t num">12:04:47</span><span class="l info">info</span><span class="c">coordinator</span><span class="m"><b>state Downloading</b> <span class="f">id=8821 files=3/5</span></span></div>
+        <div class="rl"><span class="t num">12:04:45</span><span class="l warn">warn</span><span class="c">download</span><span class="m"><b>retrying after transient error</b> <span class="f">file=…E03.mkv attempt=2/5</span></span></div>
+        <div class="rl"><span class="t num">12:04:41</span><span class="l info">info</span><span class="c">transfers</span><span class="m"><b>put.io fetch complete</b> <span class="f">id=8821 size=4.0G</span></span></div>
+        <div class="rl"><span class="t num">12:04:38</span><span class="l error">error</span><span class="c">download</span><span class="m"><b>permanent failure, giving up</b> <span class="f">id=7740 err=no space left on device</span></span></div>
+        <div class="rl"><span class="t num">12:04:33</span><span class="l info">info</span><span class="c">cleanup</span><span class="m"><b>deleted put.io source</b> <span class="f">id=7651 name=Andor.S02E05</span></span></div>
+        <div class="rl"><span class="t num">12:04:29</span><span class="l debug">debug</span><span class="c">api</span><span class="m"><b>quota refreshed</b> <span class="f">used=66.8% avail=339.6G</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== REGISTER (settings) ===================== -->
+  <section class="sect">
+    <div class="runhead"><span class="no">03</span><h2>Register</h2><span class="meta"><b>1</b> change pending</span></div>
+    <div class="register">
+
+      <div class="reg">
+        <div class="key">log_level<div class="badges"><span class="bdg src">default</span><span class="bdg live">live</span></div></div>
+        <div class="desc">Applies immediately. Widens or narrows the live record stream above.</div>
+        <div class="ctrl"><div class="seg"><button>debug</button><button class="on">info</button><button>warn</button><button>error</button><button>fatal</button><button>none</button></div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">workers<div class="badges"><span class="bdg src">file</span><span class="bdg live">live</span></div></div>
+        <div class="desc">Concurrent local downloads. Shrinking retires workers as in-flight jobs finish.</div>
+        <div class="ctrl"><div class="step"><button>−</button><span class="val num">4</span><button>+</button></div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">target<div class="badges"><span class="bdg src">env</span><span class="bdg locked">locked</span><span class="bdg restart">restart</span></div></div>
+        <div class="desc">Pinned by <b>PLDR_TARGET</b>. The daemon can't rewrite compose, so this is read-only here.</div>
+        <div class="ctrl"><div class="inp locked">/downloads <span class="x">🔒</span></div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">folder<div class="badges"><span class="bdg src">flag</span><span class="bdg restart">restart</span></div></div>
+        <div class="desc">put.io folder to watch. Restart required to re-scope.</div>
+        <div class="ctrl"><div class="inp">plundrio <span class="x">▾</span></div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">listen<div class="badges"><span class="bdg src">default</span><span class="bdg restart">restart</span></div></div>
+        <div class="desc">Transmission RPC bind address.</div>
+        <div class="ctrl"><div class="inp">:9091</div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">dashboard_listen<div class="badges"><span class="bdg src">file</span><span class="bdg restart">restart</span></div></div>
+        <div class="desc">This dashboard's bind address.</div>
+        <div class="ctrl"><div class="inp">:9092</div></div>
+      </div>
+
+      <div class="reg">
+        <div class="key">token<div class="badges"><span class="bdg src">env</span><span class="bdg locked">locked</span></div></div>
+        <div class="desc">Pinned by <b>PLDR_TOKEN</b>. The value is never read back — only replaced.</div>
+        <div class="ctrl"><div class="tokenRow"><span class="tokenMask">•••••••••••••• set</span><button class="btn ghost">Replace…</button></div></div>
+      </div>
+
+    </div>
+    <div class="regFoot"><span class="dirty">● log_level pending</span><span class="sp"></span><button class="btn ghost">Discard</button><button class="btn prim">Save changes</button></div>
+  </section>
+
+  <footer>plundrio · put.io ⇄ *arr bridge · all values seeded for preview</footer>
+</main>
+</body>
+</html>
