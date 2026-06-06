@@ -186,3 +186,24 @@ Screenshot policy going forward: commit the verdict .md files + the passing/hero
 exploration sets (ui-review-1, 19 MB) are gitignored, not committed. Demo-data caveat: the local-
 download focal-hero state dwells <100ms even at 1s polling (small demo files), so that one state is
 snapshot-captured; the put.io-fetch leg now climbs live. Noted for a future richer-demo planner item.
+
+## 2026-06-06 — M7: Nix go:embed build + CI
+
+Added a `frontend` `buildNpmPackage` derivation (native `pkgs`, `nodejs_22`, `dist`→`$out`) wired into
+`makePlundrio` via `postPatch` (`rm -rf internal/web/dist; cp -r ${frontend}/. internal/web/dist/`) so
+`//go:embed all:dist` bakes the real UI into the binary. Built once natively, shared by both Go arches
+(JS never cross-built). Exposed `packages.plundrio-ui`. `go.mod`/`go.sum`/`gomod2nix.toml` unchanged —
+the dashboard backend added only stdlib `embed`, no external deps. CI gains a cheap `ui` job
+(npm ci/lint/check/test/build) for fast PR feedback; the existing go/lint/nix jobs are unchanged.
+CLAUDE.md Build & CI now documents the embed mechanism + the two-lockfile-hash rule (gomod2nix.toml
+for Go, npmDepsHash for npm).
+
+**KNOWN GAP (honest):** no Nix in the build environment, so `npmDepsHash` is a clearly-marked
+`fakeHash` placeholder and `nix build .#plundrio` / `.#plundrio-aarch64` could not be run or the hash
+computed locally. The embed PATH was verified by simulating the `postPatch` (copied the real `ui/dist`
+into `internal/web/dist`, `go run --demo`, curled `/` → real Vite output, placeholder absent, the
+hashed JS asset served 200/79 KB from the embedded FS, then restored the placeholder). Bare
+`go build ./...` + `go test ./...` + the UI scripts all pass. The `nix` CI job will FAIL until
+`npmDepsHash` is regenerated on a Nix machine — a documented one-line operator step
+(`nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json`). This is the single manual step before
+the PR's nix build goes green.

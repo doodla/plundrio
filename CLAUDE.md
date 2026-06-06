@@ -10,12 +10,17 @@ plundrio is a put.io download client that integrates with the *arr stack (Sonarr
 
 This project uses **Nix flakes** exclusively for building — there is no Makefile or goreleaser.
 
+The binary embeds the web dashboard. `nix build` runs two derivations: `plundrio-ui` (`buildNpmPackage`) builds `ui/` to a `dist/` tree, and `makePlundrio` copies that tree into `internal/web/dist` via `postPatch` so `//go:embed all:dist` bakes it into the binary. The frontend is arch-independent, so it is built once with native `pkgs` and the same `dist/` is shared by both the native and aarch64 Go derivations (the JS is never cross-built).
+
 ```bash
-# Build native binary
+# Build native binary (with the embedded dashboard)
 nix build .#plundrio
 
-# Build for aarch64
+# Build for aarch64 (reuses the one native frontend build)
 nix build .#plundrio-aarch64
+
+# Build just the dashboard dist/ tree
+nix build .#plundrio-ui
 
 # Build Docker images
 nix build .#plundrio-docker
@@ -24,7 +29,9 @@ nix build .#plundrio-docker-aarch64
 # Enter dev shell (Go, gopls, golangci-lint)
 nix develop
 
-# Run directly with Go (during development)
+# Run directly with Go (during development). A non-dotfile placeholder lives in
+# internal/web/dist so this compiles without building the UI; the real dashboard
+# is only embedded by `nix build`.
 go build ./cmd/plundrio && ./plundrio run --help
 ```
 
@@ -36,7 +43,10 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 `release.yml` builds all four targets (native, aarch64, docker, docker-aarch64) at release publish.
 
-**Important**: When Go dependencies change (`go.mod`/`go.sum`), regenerate `gomod2nix.toml` — `nix develop -c gomod2nix generate` from the repo root, or `nix run github:nix-community/gomod2nix` if not in the dev shell. The flake reads `modules = ./gomod2nix.toml` (no `vendorHash` — `buildGoApplication` resolves modules from the lockfile).
+**Important — two lockfile hashes to keep in sync, one per ecosystem:**
+
+- **Go modules** (`go.mod`/`go.sum` change): regenerate `gomod2nix.toml` — `nix develop -c gomod2nix generate` from the repo root, or `nix run github:nix-community/gomod2nix` if not in the dev shell. The flake reads `modules = ./gomod2nix.toml` (no `vendorHash` — `buildGoApplication` resolves modules from the lockfile).
+- **npm deps** (`ui/package-lock.json` change): regenerate `npmDepsHash` in `flake.nix` (the `frontend` derivation) — `nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json` and paste the printed `sha256-…` into `npmDepsHash`. Alternatively set it to `pkgs.lib.fakeHash`, run `nix build .#plundrio`, and copy the `got:` value from the hash-mismatch error. Keep `ui/package-lock.json` complete: it must carry the `@esbuild/linux-*` and `@rollup/rollup-linux-*` optional-dep entries (it does) so the offline sandbox on the Linux CI builder gets the native binaries without a postinstall download.
 
 ## Fork-only
 

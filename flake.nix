@@ -167,6 +167,41 @@
           overlays = [ gomod2nix.overlays.default ];
         };
 
+        # The Svelte/Vite dashboard, built to a plain dist/ tree. Arch-independent
+        # (Vite emits HTML/CSS/JS text, not machine code), so it is built ONCE with
+        # native `pkgs` and the same derivation is shared by both Go arches below —
+        # never cross-built. The npm dependency fetch is the only network-touching
+        # step; it is a fixed-output derivation gated by npmDepsHash, exactly as
+        # gomod2nix.toml gates the Go modules.
+        #
+        # npmDepsHash regen (the JS analog to `gomod2nix generate`): after any
+        # ui/package-lock.json change, run
+        #   nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json
+        # and paste the printed sha256 here. See CLAUDE.md "Build & CI".
+        frontend = pkgs.buildNpmPackage {
+          pname = "${pname}-ui";
+          inherit version;
+          src = ./ui;
+
+          # PLACEHOLDER — compute with:
+          #   nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json
+          # (or set to lib.fakeHash, run `nix build .#plundrio`, and copy the
+          # `got:` value from the hash-mismatch error). CI computes the real hash.
+          npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+          # Pin the Node toolchain so a Vite engines field can't drift esbuild/
+          # rollup binary resolution under us across nixpkgs bumps.
+          nodejs = pkgs.nodejs_22;
+
+          # `npm run build` (vite build) emits dist/. The default install packs a
+          # node module; we want exactly the static tree as $out.
+          installPhase = ''
+            runHook preInstall
+            cp -r dist "$out"
+            runHook postInstall
+          '';
+        };
+
         # Create a package for the specified system/platform
         makePlundrio = crossPkgs: crossPkgs.buildGoApplication rec {
           inherit pname version;
@@ -174,6 +209,15 @@
           modules = ./gomod2nix.toml;
           pwd = ./.;
           subPackages = [ "cmd/${pname}" ];
+
+          # Overwrite the committed placeholder in internal/web/dist with the real
+          # Vite output before the Go compile, so `//go:embed all:dist` bakes the
+          # dashboard into the binary. `frontend` is closed over from native pkgs,
+          # so the native and aarch64 derivations embed the identical dist/.
+          postPatch = ''
+            rm -rf internal/web/dist
+            cp -r ${frontend}/. internal/web/dist/
+          '';
 
           # Pin Go's toolchain selection to whatever Nix provides. Without
           # this, go.mod's `toolchain` directive triggers a network download
@@ -218,6 +262,11 @@
       in
       {
         packages = {
+          # The dashboard dist/ tree on its own (arch-independent). Exposed so it
+          # can be built/inspected/cached independently of the Go binary; the four
+          # plundrio outputs all embed this same derivation.
+          plundrio-ui = frontend;
+
           # Native build
           plundrio = makePlundrio pkgs;
           plundrio-docker = makeDocker self.packages.${system}.plundrio "amd64";
