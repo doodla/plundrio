@@ -114,3 +114,28 @@ Round-1 mockups kept as the anti-pattern reference. Re-running as a FRESH spawn 
 contract + design.md, with the M2 harness (demo mode + prober) as its test substrate. Zero dependency
 on the visual mockups; the contract is stable (round-1 designer confirmed no amendment needed, and a
 craft-level redesign uses the same four surfaces + same data). This recovers the bounce's wall-clock.
+
+## 2026-06-06 — M4: backend built + code-review gate passed
+
+backend-builder implemented all five daemon changes + the transferprog MOVE: `internal/dashboard`
+(listener, REST, SSE hub, render DTO, settings), `internal/web` (`//go:embed all:dist` + placeholder),
+`internal/config/overrides.go` (runtime-overrides layer, env-skip guard), `internal/transferprog`
+(moved two-phase math, shared by server + dashboard), log fan-out in `internal/log`, worker resize in
+`internal/download`. Tested headless via the M2 harness: `TestContractAgainstDemoServer` boots the
+dashboard in demo mode and runs the contract prober (with an env-pinned sentinel token) — green.
+
+code-reviewer ran an EQUIPPED gate (build on bare checkout, vet, `test -race -count=5`, the prober,
+grep for token leakage) → **VERDICT APPROVE, 0 must-fix**. It verified the transferprog move is
+line-identical to HEAD (so `:9091` behavior is unchanged), reasoned through the shrink-test
+determinism (N tokens → N exits, ordering-independent — passes for the right reason), and judged the
+token-persistable-but-never-boot-applied resolution sound (no upstream bounce).
+
+Two non-blocking nits folded in before commit (kept dead code + a contract gap out of history):
+unknown `/api/*` now returns the contract's JSON 404 via an `/api/` ServeMux catch-all (removing the
+dead `codeNotFound`; SPA fallback still serves non-API deep links), and a test helper now genuinely
+unsets `PLDR_*` vars. Re-verified green. The backend can be exercised live with
+`--demo --dashboard-listen :9092`.
+
+The contract underspec the builder surfaced (contract lists `token` under PUT `persisted`, design's
+overrides shape omits it) was resolved in-build, not bounced: token is persistable but excluded from
+the boot-applied override set, so a stale file token can never become the live token. Gate confirmed.

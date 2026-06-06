@@ -37,6 +37,12 @@ type Config struct {
 	// ListenAddr is the address to listen for transmission-rpc requests.
 	ListenAddr string `mapstructure:"listen"`
 
+	// DashboardListen is the address the web dashboard's HTTP listener binds
+	// to (separate from ListenAddr / the RPC :9091). Empty disables the
+	// dashboard entirely — default-off, no new listener. Env
+	// PLDR_DASHBOARD_LISTEN, flag --dashboard-listen.
+	DashboardListen string `mapstructure:"dashboard_listen"`
+
 	// WorkerCount is the number of concurrent download workers (default: 4).
 	WorkerCount int `mapstructure:"workers"`
 

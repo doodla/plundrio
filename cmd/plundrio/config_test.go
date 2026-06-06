@@ -183,11 +183,13 @@ log_level: debug
 func TestFlagViperBindingsCoverAllRunFlags(t *testing.T) {
 	cmd := newTestRunCmd()
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		// `config` and `demo` are special-cased: both are read directly via
-		// cmd.Flags() (GetString / GetBool) rather than viper, so they don't
-		// need a viper binding. `demo` is a boot-time control (also via
-		// PLDR_DEMO), never persisted or unmarshaled into Config.
-		if f.Name == "config" || f.Name == "demo" {
+		// `config`, `demo`, and `overrides-file` are special-cased: all are read
+		// directly via cmd.Flags() (GetString / GetBool) rather than viper, so
+		// they don't need a viper binding. `demo` is a boot-time control (also
+		// via PLDR_DEMO), never persisted or unmarshaled into Config;
+		// `overrides-file` only locates the overrides file, it isn't a Config
+		// field.
+		if f.Name == "config" || f.Name == "demo" || f.Name == "overrides-file" {
 			return
 		}
 		if _, ok := flagViperBindings[f.Name]; !ok {

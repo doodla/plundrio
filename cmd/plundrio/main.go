@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/doodla/plundrio/internal/api"
 	"github.com/doodla/plundrio/internal/config"
+	"github.com/doodla/plundrio/internal/dashboard"
 	"github.com/doodla/plundrio/internal/demo"
 	"github.com/doodla/plundrio/internal/download"
 	"github.com/doodla/plundrio/internal/log"
@@ -39,6 +41,7 @@ var flagViperBindings = map[string]string{
 	"workers":                 "workers",
 	"post-complete-retention": "post_complete_retention",
 	"log-level":               "log_level",
+	"dashboard-listen":        "dashboard_listen",
 }
 
 var (
@@ -94,6 +97,30 @@ func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 		}
 	}
 
+	// Layer the runtime-overrides file on top, for non-env-pinned keys only.
+	// Path: --overrides-file / PLDR_OVERRIDES_FILE, else <target>/.plundrio-overrides.json
+	// where <target> is resolved from env/flag/config (the daemon's writable
+	// volume). Applied via viper.Set (Override tier) AFTER the flag bindings so
+	// it beats flag/config, but the env-skip guard in ApplyOverrides keeps
+	// env-pinned keys winning. This adds a tier; it does NOT reorder the flag
+	// bindings (the v0.10.11/12 drift cautionary tale).
+	overridesPath := resolveOverridesPath(cmd, viper.GetString("target"))
+	if overridesPath != "" {
+		ov, err := config.LoadOverrides(overridesPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("load overrides: %w", err)
+		}
+		if len(ov) > 0 {
+			applied := config.ApplyOverrides(viper.GetViper(), ov)
+			if len(applied) > 0 {
+				log.Info("config").
+					Str("file", overridesPath).
+					Strs("applied_keys", applied).
+					Msg("Applied runtime overrides")
+			}
+		}
+	}
+
 	var cfg config.Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, "", fmt.Errorf("decode config: %w", err)
@@ -108,6 +135,24 @@ func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 	cfg.OAuthToken = token
 
 	return &cfg, viper.GetString("log_level"), nil
+}
+
+// resolveOverridesPath resolves where the runtime-overrides JSON file lives:
+// the --overrides-file flag, else PLDR_OVERRIDES_FILE, else
+// <target>/.plundrio-overrides.json. target is the env/flag/config-resolved
+// target dir (the daemon's writable volume); the overrides file lives there
+// alongside the category state. Returns "" only when no target is known yet.
+func resolveOverridesPath(cmd *cobra.Command, target string) string {
+	if p, _ := cmd.Flags().GetString("overrides-file"); p != "" {
+		return p
+	}
+	if env := os.Getenv("PLDR_OVERRIDES_FILE"); env != "" {
+		return env
+	}
+	if target != "" {
+		return filepath.Join(target, ".plundrio-overrides.json")
+	}
+	return ""
 }
 
 // putioClient is the union of the put.io methods the download manager and the
@@ -255,6 +300,26 @@ var runCmd = &cobra.Command{
 			}
 		}()
 
+		// Initialize and start the web dashboard listener, if configured.
+		// Default-off: when DashboardListen is empty nothing is constructed, so
+		// the dashboard adds zero surface. Unlike the RPC server above, a
+		// dashboard ListenAndServe error logs Error and returns — it must NOT
+		// log.Fatal, which would kill the daemon and take down the load-bearing
+		// RPC path. The dashboard is a second, non-load-bearing face.
+		var dash *dashboard.Dashboard
+		if cfg.DashboardListen != "" {
+			overridesPath := resolveOverridesPath(cmd, cfg.TargetDir)
+			dash = dashboard.New(cfg, client, dlManager, overridesPath)
+			go func() {
+				log.Info("dashboard").
+					Str("addr", cfg.DashboardListen).
+					Msg("Starting web dashboard")
+				if err := dash.Start(); err != nil {
+					log.Error("dashboard").Err(err).Msg("Dashboard server error (RPC path unaffected)")
+				}
+			}()
+		}
+
 		// Wait for interrupt signal
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -270,6 +335,13 @@ var runCmd = &cobra.Command{
 		log.Info("shutdown").Msg("Stopping server...")
 		if err := srv.Stop(); err != nil {
 			log.Error("shutdown").Err(err).Msg("Error stopping server")
+		}
+
+		if dash != nil {
+			log.Info("shutdown").Msg("Stopping dashboard...")
+			if err := dash.Stop(); err != nil {
+				log.Error("shutdown").Err(err).Msg("Error stopping dashboard")
+			}
 		}
 	},
 }
@@ -405,6 +477,8 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
+	cmd.Flags().String("dashboard-listen", "", "Address for the web dashboard HTTP listener (e.g. :9092). Empty disables the dashboard. Also via PLDR_DASHBOARD_LISTEN.")
+	cmd.Flags().String("overrides-file", "", "Path to the runtime-overrides JSON file (default <target>/.plundrio-overrides.json). Also via PLDR_OVERRIDES_FILE.")
 	cmd.Flags().Bool("demo", false, "Run with a fake in-process put.io client serving synthetic data (also via PLDR_DEMO=1). For dashboard development/screenshots; never touches a real account or token.")
 }
 

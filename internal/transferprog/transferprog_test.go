@@ -1,4 +1,4 @@
-package server
+package transferprog
 
 import (
 	"errors"
@@ -12,27 +12,17 @@ func newTestTransferCtx(state download.TransferLifecycleState, totalFiles int32,
 	ctx := download.NewTransferContext(0, totalFiles, state)
 	ctx.SetTotalSize(totalSize)
 	ctx.AddDownloadedBytes(downloadedSize)
-	// Simulate completed files by calling no internal method — we just need the
-	// progress snapshot to return the right completedFiles count.
-	// Since completedFiles is unexported, we rely on the fact that GetProgress()
-	// returns 0 for completedFiles by default. For tests that need nonzero
-	// completedFiles we must use a different approach.
-	//
-	// Actually, we can work around this: the progress calculation uses GetProgress()
-	// which returns completedFiles. We need a way to set it. Let's just build the
-	// tests to not depend on completedFiles from GetProgress when we can use
-	// totalSize/downloadedSize instead (which is the primary path).
-	//
-	// For the file-count fallback path (totalSize==0), we accept that completedFiles
-	// will be 0 in cross-package tests. The coordinator_test.go (same package) covers
-	// the completedFiles path.
+	// completedFiles is unexported and only the same-package coordinator can
+	// advance it; cross-package tests that need a nonzero completedFiles rely
+	// instead on totalSize/downloadedSize (the primary progress path). The
+	// file-count fallback (totalSize==0) is covered in coordinator_test.go.
 	return ctx
 }
 
 func TestCalculateProgress(t *testing.T) {
 	tests := []struct {
 		name              string
-		input             progressInput
+		input             Input
 		wantPercentDone   float64
 		wantStatus        int
 		wantLeftUntilDone int64
@@ -42,35 +32,35 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "no context, putio 0%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 0,
 				PutioStatus:      "DOWNLOADING",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   0.0,
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 1000,
 		},
 		{
 			name: "no context, putio 50%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 50,
 				PutioStatus:      "DOWNLOADING",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   0.25,
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 500,
 		},
 		{
 			name: "no context, putio 100%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "DOWNLOADING",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   0.5,
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 0,
 		},
 		// ---------------------------------------------------------------
@@ -78,24 +68,24 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "no context, COMPLETED status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   1.0,
-			wantStatus:        trStatusSeed,
+			wantStatus:        TrStatusSeed,
 			wantLeftUntilDone: 0,
 		},
 		{
 			name: "no context, SEEDING status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "SEEDING",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   1.0,
-			wantStatus:        trStatusSeed,
+			wantStatus:        TrStatusSeed,
 			wantLeftUntilDone: 0,
 		},
 		// ---------------------------------------------------------------
@@ -103,26 +93,26 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "with context, putio 100% + local 50%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        1000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleDownloading, 2, 1, 1000, 500),
 			},
 			wantPercentDone:   0.75, // 0.5 (putio) + 0.25 (local 500/1000 * 0.5)
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 500, // 0 putio + 500 local
 		},
 		{
 			name: "with context, putio 50% + local 0%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 50,
 				PutioStatus:      "DOWNLOADING",
 				PutioSize:        2000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleDownloading, 4, 0, 2000, 0),
 			},
 			wantPercentDone:   0.25, // 0.25 (putio) + 0.0 (local)
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 3000, // 1000 putio + 2000 local
 		},
 		// ---------------------------------------------------------------
@@ -130,14 +120,14 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "with context, processed state",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        1000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleProcessed, 3, 3, 1000, 1000),
 			},
 			wantPercentDone:   1.0,
-			wantStatus:        trStatusSeed,
+			wantStatus:        TrStatusSeed,
 			wantLeftUntilDone: 0,
 		},
 		// ---------------------------------------------------------------
@@ -145,26 +135,26 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "with context, completed state + COMPLETED status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        1000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleCompleted, 2, 2, 1000, 1000),
 			},
 			wantPercentDone:   1.0, // 0.5 + 0.5
-			wantStatus:        trStatusSeed,
+			wantStatus:        TrStatusSeed,
 			wantLeftUntilDone: 0,
 		},
 		{
 			name: "with context, completed state + IN_QUEUE status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "IN_QUEUE",
 				PutioSize:        1000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleCompleted, 1, 1, 1000, 1000),
 			},
 			wantPercentDone:   1.0,
-			wantStatus:        trStatusDownloadWaiting,
+			wantStatus:        TrStatusDownloadWaiting,
 			wantLeftUntilDone: 0,
 		},
 		// ---------------------------------------------------------------
@@ -175,14 +165,14 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "with context, zero size uses file count (cross-package: completedFiles=0)",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        0,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleDownloading, 4, 0, 0, 0),
 			},
 			wantPercentDone:   0.5, // 0.5 (putio) + 0.0 (0/4 * 0.5)
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 0, // both putio and local are 0 bytes
 		},
 		// ---------------------------------------------------------------
@@ -190,7 +180,7 @@ func TestCalculateProgress(t *testing.T) {
 		// ---------------------------------------------------------------
 		{
 			name: "with context, zero size + zero files",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 50,
 				PutioStatus:      "DOWNLOADING",
 				PutioSize:        1000,
@@ -199,48 +189,48 @@ func TestCalculateProgress(t *testing.T) {
 			},
 			// No context path because TotalFiles == 0, status is DOWNLOADING
 			wantPercentDone:   0.25,
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 500,
 		},
 		{
 			name: "with context, putio 100% + local 0%",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 100,
 				PutioStatus:      "COMPLETED",
 				PutioSize:        5000,
 				TransferCtx:      newTestTransferCtx(download.TransferLifecycleDownloading, 10, 0, 5000, 0),
 			},
 			wantPercentDone:   0.5, // 0.5 (putio) + 0.0 (local)
-			wantStatus:        trStatusDownload,
+			wantStatus:        TrStatusDownload,
 			wantLeftUntilDone: 5000, // 0 putio + 5000 local
 		},
 		{
 			name: "no context, IN_QUEUE status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 0,
 				PutioStatus:      "IN_QUEUE",
 				PutioSize:        2000,
 			},
 			wantPercentDone:   0.0,
-			wantStatus:        trStatusDownloadWaiting,
+			wantStatus:        TrStatusDownloadWaiting,
 			wantLeftUntilDone: 2000,
 		},
 		{
 			name: "no context, ERROR status",
-			input: progressInput{
+			input: Input{
 				PutioPercentDone: 30,
 				PutioStatus:      "ERROR",
 				PutioSize:        1000,
 			},
 			wantPercentDone:   0.15,
-			wantStatus:        trStatusStopped,
+			wantStatus:        TrStatusStopped,
 			wantLeftUntilDone: 700,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := calculateProgress(tt.input)
+			got := CalculateProgress(tt.input)
 
 			const epsilon = 1e-9
 			if diff := got.PercentDone - tt.wantPercentDone; diff > epsilon || diff < -epsilon {
@@ -272,14 +262,14 @@ func TestCalculateProgressPermanentFailureSurfaces(t *testing.T) {
 		t.Fatalf("MarkPermanentlyFailed: %v", err)
 	}
 
-	got := calculateProgress(progressInput{
+	got := CalculateProgress(Input{
 		PutioPercentDone: 100,
 		PutioStatus:      "COMPLETED",
 		PutioSize:        1000,
 		TransferCtx:      ctx,
 	})
-	if got.Status != trStatusStopped {
-		t.Errorf("Status = %d, want trStatusStopped (%d)", got.Status, trStatusStopped)
+	if got.Status != TrStatusStopped {
+		t.Errorf("Status = %d, want TrStatusStopped (%d)", got.Status, TrStatusStopped)
 	}
 	if got.Error == "" {
 		t.Errorf("Error = %q, want non-empty so handler can populate Transmission errorString", got.Error)
@@ -294,14 +284,14 @@ func TestCalculateProgressPermanentFailureSurfaces(t *testing.T) {
 	if err := tc2.FailTransfer(2, errors.New("CDN reset")); err != nil {
 		t.Fatalf("FailTransfer: %v", err)
 	}
-	got2 := calculateProgress(progressInput{
+	got2 := CalculateProgress(Input{
 		PutioPercentDone: 100,
 		PutioStatus:      "COMPLETED",
 		PutioSize:        1000,
 		TransferCtx:      ctx2,
 	})
-	if got2.Status != trStatusDownload {
-		t.Errorf("transient Failed: Status = %d, want trStatusDownload (%d)", got2.Status, trStatusDownload)
+	if got2.Status != TrStatusDownload {
+		t.Errorf("transient Failed: Status = %d, want TrStatusDownload (%d)", got2.Status, TrStatusDownload)
 	}
 	if got2.Error != "" {
 		t.Errorf("transient Failed: Error = %q, want empty (still retrying)", got2.Error)

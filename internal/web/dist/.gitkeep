@@ -1,0 +1,5 @@
+# Placeholder so `//go:embed all:dist` compiles on a bare checkout before the
+# Svelte frontend is built. The real build copies ui/dist/ here, replacing this.
+# The `all:` prefix in embed.go is what lets this dotfile-only directory satisfy
+# the embed directive — a plain `//go:embed dist` would reject a dotfile-only
+# tree with "contains no embeddable files".
