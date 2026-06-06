@@ -139,3 +139,27 @@ unsets `PLDR_*` vars. Re-verified green. The backend can be exercised live with
 The contract underspec the builder surfaced (contract lists `token` under PUT `persisted`, design's
 overrides shape omits it) was resolved in-build, not bounced: token is persistable but excluded from
 the boot-applied override set, so a stale file token can never become the live token. Gate confirmed.
+
+## 2026-06-06 — M3 LOCKED: relaydeck + ship-all-palettes-as-themes
+
+Design iteration converged. Sequence of operator gates: round 1 (console/studio/horizon) REJECTED as
+generic → role bar raised → round 2 (relay/tarmac/ledger) → operator picked a relay×tarmac COMBO +
+light/dark → designer produced `relaydeck` (fused flow-gauge hero) → operator approved layout/hero
+but rejected the dial glow + the chartreuse palette → glow removed + three palette candidates
+(tide/ember/ion) → operator: "it's the same structure, yeah? ship with themes."
+
+**Resolution (read of that answer):** the three palettes are interchangeable color systems on the
+approved layout, so SHIP ALL THREE as user-selectable themes rather than locking one. Final locked
+design: relaydeck layout + fused flow-gauge hero (glow removed) + {tide, ember, ion} × {light, dark}
+as a palette×mode theme system. Default **ion + dark** (orchestrator's call — operator didn't specify
+a default; ion matches the Linear/Raycast bar they cited and their initial dark lean; fully
+switchable). The picker is a pure client-side browser preference (localStorage) — NO backend/contract
+change, since the daemon doesn't need to know the viewer's theme.
+
+The infra cost is near-zero: the designer already tokenized everything with `?palette=`/`?theme=`
+resolved before paint, so all six combos are first-class. Frontend reads the exact token values from
+the committed mockup CSS (the concrete source of truth for color).
+
+Launching M5 frontend-builder (Svelte 5 + Vite) against SPEC + contract + the live M4 demo backend.
+In parallel, the designer finalizes SPEC §2 to document the multi-palette theme system + selector +
+default (token values unchanged — locked in the committed mockup). All 10 role files now authored.
