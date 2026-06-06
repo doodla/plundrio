@@ -1,0 +1,19 @@
+# Check 6 — Polish parity (embedded binary renders the approved relaydeck design)
+
+Live embedded UI captured at desktop (1440x900) + mobile (390x844) in two palettes:
+  - ion-dark (default):  polish-ion-dark/{desktop,mobile}.png   + midflight-ion-dark/desktop.png
+  - tide-light:          polish-tide-light/{desktop,mobile}.png
+
+Confirmed against approved reference mockup (screenshots/relaydeck-ion-dark, relaydeck-tide-light):
+  - flow-gauge reads as ONE instrument: dial + center combined % + two-colored arc split + handoff
+    node + traveling comet (verified live in midflight-ion-dark: 8% combined, put.io comet on the
+    active leg, LOCAL leg muted '—').
+  - rail: brand, DECK/ACCOUNT/LOGS/SETTINGS nav, palette picker (3 swatches, active ringed),
+    mode toggle, STREAM LIVE pill — all present and correct.
+  - account cluster (active transfers, aggregate down, ticked put.io disk meter), fleet rows with
+    mini-gauges + two phase bars (PUT.IO / LOCAL) + rate/ETA — match the mockup IA byte-for-byte.
+  - tide-light keeps the instrument (graphite-on-pale) identity, NOT editorial; aqua-teal disk meter,
+    same layout/geometry as ion-dark (recolor only).
+
+ui-reviewer already graded fine-grained polish (ui-review-2 = APPROVE). This check confirms the
+EMBEDDED binary renders that approved design, not a regression. PASS.

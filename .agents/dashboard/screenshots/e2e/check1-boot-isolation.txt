@@ -1,0 +1,20 @@
+# Check 1 — Boot + isolation evidence (2026-06-06T20:08:58Z)
+
+## Demo banner (loud, WRN level) from boot log:
+[90m2026-06-06T13:08:33-07:00[0m [33mWRN[0m [1mDEMO MODE ACTIVE — serving synthetic put.io data; no real account or token is used[0m [36mcomponent=[0mdemo [36mfake_data=[0mtrue [36mfolder_id=[0m99000
+[90m2026-06-06T13:08:33-07:00[0m [32mINF[0m [1mStarting web dashboard[0m [36maddr=[0m:9092 [36mcomponent=[0mdashboard
+
+## :9092 dashboard does NOT serve Transmission RPC
+POST :9092/transmission/rpc ->
+  status=405
+  body: {"error":{"code":"method_not_allowed","message":"method not allowed"}}
+
+## :9091 RPC listener (separate) answers session-get
+  session-id=123
+  session-get -> {"result":"success","arguments":{"download-dir":"/var/folders/h1/g68scqh939n8kgw31xxqvq6r0000gn/T/tmp.BWzSDZPkYM","rpc-version":15,"rpc-version-minimum":1,"version":"2.94"}}
+
+## :9091 does NOT serve dashboard API (/api/transfers)
+  status=404
+
+## :9092 dashboard API reachable
+  /api/transfers status=200

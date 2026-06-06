@@ -1,0 +1,12 @@
+# Check 3 — SSE log stream respects level + stdout preserved
+
+## At log_level=info (4s SSE window): level counts = {error:1, info:3}; DEBUG events = 0 (gate holds)
+## PUT /api/settings {"log_level":"debug"} -> applied:[log_level], live-applied immediately, source flipped default->file
+## At log_level=debug (5s SSE window): 52 log events incl 47 DEBUG (stream widened live)
+   sample debug events: 'Checking transfers', 'Retrieved transfers from API', 'Transfer status summary'
+
+## stdout console leg preserved (MultiLevelWriter tees both): 122 'DBG' colored lines in daemon stdout after the change
+   sample console DBG line:
+2026-06-06T13:19:59-07:00 DBG Transfer already being processed component=transfers transfer_id=4003
+
+Evidence: sse-loglevel-info.txt (0 debug), sse-loglevel-debug.txt (47 debug)

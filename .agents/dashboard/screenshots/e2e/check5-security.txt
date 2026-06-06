@@ -1,0 +1,15 @@
+# Check 5 — Security invariant (token never in any payload)
+
+Daemon booted with PLDR_TOKEN=LEAKCANARY_DO_NOT_SHIP (token IS present in cfg.OAuthToken).
+
+## grep for sentinel 'LEAKCANARY_DO_NOT_SHIP' across ALL captured REST + SSE payloads: 0 matches
+   scanned: rest-transfers, rest-account, rest-settings-get, rest-settings-put,
+            sse-full-window, sse-during-put (snapshot/transfers/account/log/settings events),
+            sse-loglevel-info, sse-loglevel-debug, sse-raw-capture
+
+## /api/settings token entry (GET and PUT response): value=null, is_set=true, locked=true (source=env)
+
+## Independent corroboration: go test internal/dashboard TestContractAgainstDemoServer passes,
+   which seeds contractprobe.DemoTokenSentinel as PLDR_TOKEN and asserts assertNoToken across every payload.
+
+Evidence: payloads/ dir (all REST+SSE captures), grep result = 0 matches.

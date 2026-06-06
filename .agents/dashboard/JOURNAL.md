@@ -207,3 +207,29 @@ hashed JS asset served 200/79 KB from the embedded FS, then restored the placeho
 `npmDepsHash` is regenerated on a Nix machine — a documented one-line operator step
 (`nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json`). This is the single manual step before
 the PR's nix build goes green.
+
+## 2026-06-06 — M6: integration e2e — SHIP GATE PASSED (APPROVE)
+
+Verified the REAL embedded binary (Svelte `dist` copied into `internal/web/dist` exactly as the Nix
+`postPatch` does, then recompiled) booted in `--demo` mode on `:9092` with a leak-sentinel token. All
+six checks PASS:
+1. Boot + isolation — dashboard `:9092` does NOT serve Transmission RPC (`POST /transmission/rpc` →
+   405); RPC `:9091` is a separate listener; loud demo banner.
+2. Two-phase live — `percent_done` climbs 0→0.48 with `local_phase:null`, then the handoff
+   (putio%=100, pct=0.5, local_phase null→present) → Processed/1.0; contract math `putio/200+local·0.5`
+   exact; mid-flight flow-gauge captured.
+3. Log levels — info: 0 debug SSE events; after live `PUT {log_level:debug}`: 47; stdout console leg
+   still emits DBG lines.
+4. Settings round-trip — live `workers` 4→8; restart-required `target` → `restart_required` + written
+   to overrides file; locked `token` → 400 `key_locked`.
+5. Security — sentinel token in NONE of the captured REST+SSE payloads; `token.value:null`,
+   `is_set:true`.
+6. Polish parity — live ion-dark + tide-light (desktop+mobile) match relaydeck; no regression.
+`contractprobe.ProbeContract` green in-process + against the live embedded server. Tree restored
+byte-exact; no stray processes.
+
+**PRODUCT LOOP COMPLETE — M0→M6 all gate-passed.** Two gates produced bounces that the loop
+self-corrected (M1 plan: 2 build bugs; M5 frontend: 3 a11y); one operator gate bounced twice on
+design (generic → premium). Three agent-loop role revisions (harness pre-failure, ux-designer bar,
++ the routine bounces). Remaining: npmDepsHash regen (operator, needs Nix) + push/PR (needs operator
+go-ahead — outward-facing, not done autonomously).
