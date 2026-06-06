@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>plundrio</title>
+    <script>
+      /* Theme + palette resolve BEFORE first paint so there is no flash.
+         Precedence:
+           palette: ?palette= > localStorage > default 'ion'
+           theme:   ?theme=   > localStorage > prefers-color-scheme > 'dark'
+         The viewer's choice is a browser preference (localStorage) — never a
+         daemon setting. ?theme=/?palette= stay authoritative for deterministic
+         screenshots. */
+      (function () {
+        var d = document.documentElement;
+        var PALS = { tide: 1, ember: 1, ion: 1 };
+        try {
+          var p = new URLSearchParams(location.search);
+          var qt = p.get('theme');
+          var ls = localStorage.getItem('pldr-mode');
+          var theme =
+            qt === 'light' || qt === 'dark'
+              ? qt
+              : ls === 'light' || ls === 'dark'
+                ? ls
+                : window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches
+                  ? 'light'
+                  : 'dark';
+          var qp = p.get('palette');
+          var lp = localStorage.getItem('pldr-palette');
+          var pal = PALS[qp] ? qp : PALS[lp] ? lp : 'ion';
+          d.setAttribute('data-theme', theme);
+          d.setAttribute('data-palette', pal);
+        } catch (e) {
+          d.setAttribute('data-theme', 'dark');
+          d.setAttribute('data-palette', 'ion');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

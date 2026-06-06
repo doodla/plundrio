@@ -270,11 +270,20 @@ state and the **human phase label** (client-side; see §9):
 | **put.io-fetching** | `local_phase==null` (no ctx) and put.io fetch < 100% | fills `--putio`; dot pulses | empty | on put.io leg edge, `--putio` edge sheen, pulsing | combined % (= putio/200) | put.io lit, local muted "—" | `▸ fetching at put.io` |
 | **local-downloading** | `Downloading` with `local_phase!=null` and local fraction <1 | full, **muted to 50%** | fills `--local`; dot pulses | on local leg edge, `--local` edge sheen, pulsing | combined % | put.io muted "100% · handed off", local lit | `▸ local download` |
 | **completed** | `Completed`/`Processed` (or no-ctx `COMPLETED`/`SEEDING`) → `percent_done==1.0` | full, recolor `--green`, muted | full, recolor `--green` | hidden | `100%` in `--green` | both muted, "source cleaned" | `completed` |
-| **failed / permanent** | `permanent==true` (`error==true`) | full | frozen at last fraction; both legs recolor `--red` | hidden | frozen %, `--red-ink` | error string + `permanent` chip | `failed` |
+| **failed** | `error==true` (i.e. `error_string != ""`, per the contract's error-precedence) | full | frozen at last fraction; both legs recolor `--red` | hidden | frozen %, `--red-ink` | `error_string` + chip (`permanent` if `permanent==true`, else `put.io error`) | `failed` |
 
-**Transient failure** (`Failed` but `permanent==false`, `error==false`): render exactly as its
-underlying phase (still mid-progress, no red) — matches the RPC path so dashboard and *arr never
-disagree (contract "Error precedence"). Only `permanent:true` turns the instrument red.
+**Failed-state trigger (keyed on `error`, per contract "Error precedence"):** the red/failed state
+is driven by `error` — which the contract defines as `error_string != ""`. That single flag covers
+**both** failure shapes the contract distinguishes: a plundrio permanent local give-up
+(`permanent==true`, `error_string` = `progressResult.Error`) **and** a put.io-side failure
+(`permanent==false`, no ctx, `error_string` = `putio.Transfer.ErrorMessage`). `permanent` does **not**
+gate the red state — it only **refines the chip label**: `permanent` when the cascade gave up locally,
+`put.io error` otherwise.
+
+**Transient failure** (`lifecycle_state==Failed` but still retrying → `error==false`,
+`error_string==""`, `permanent==false`): render exactly as its underlying phase (still mid-progress,
+no red) — matches the RPC path so dashboard and *arr never disagree (contract "Error precedence").
+Only `error==true` turns the instrument red.
 
 ### 3.3 Fleet mini-gauge (the same instrument, compact)
 

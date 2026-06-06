@@ -1,0 +1,50 @@
+/* Self-hosted fonts (no CDN, SPEC §2.5). Latin-only, woff2-only — the UI is
+   English, and every SPA-capable browser supports woff2, so the legacy .woff
+   fallback and the cyrillic/greek/vietnamese subsets fontsource ships are dead
+   weight in a Pi binary. We declare @font-face directly against the latin-normal
+   woff2 files (only the weights the type scale uses) so exactly six font files
+   land in dist/. Vite rewrites these url()s to hashed assets. */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/inter/files/inter-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('@fontsource/inter/files/inter-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/inter/files/inter-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/inter/files/inter-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
+}

@@ -163,3 +163,26 @@ the committed mockup CSS (the concrete source of truth for color).
 Launching M5 frontend-builder (Svelte 5 + Vite) against SPEC + contract + the live M4 demo backend.
 In parallel, the designer finalizes SPEC §2 to document the multi-palette theme system + selector +
 default (token values unchanged — locked in the committed mockup). All 10 role files now authored.
+
+## 2026-06-06 — M5: frontend built + both gates passed (one consolidated bounce)
+
+Svelte 5 + Vite SPA under `ui/` (npm, 244 KB dist, no router/state libs). Two gates ran in parallel:
+- **code-review (TS):** BOUNCE, 1 a11y must-fix (settings inputs stripped the focus ring with no
+  replacement). Also VALIDATED the builder's `displayState` call — keying "failed/red" on `error`
+  (not `permanent`) is the complete, contract-faithful rule — and flagged SPEC §3.2 as imprecise.
+- **ui-review (live screenshots):** BOUNCE, 2 a11y must-fixes — light-mode contrast on the log
+  component tag and fleet "done" text (4.00 / ~4.03), the exact `--local`/`--green`-as-small-light-
+  text cases SPEC §8 pre-flagged. Otherwise a faithful, high-quality realization (fidelity, all six
+  palette×mode combos, theme picker + persistence, SSE behavior — all confirmed live).
+
+Both gates agreed the build was otherwise approved-quality. Consolidated all fixes into ONE frontend
+pass (3 a11y must-fixes + 5 nits), and in parallel: the demo-poll fix (committed separately) made
+live two-phase progress observable, and the designer reconciled SPEC §3.2 to the code/contract.
+**Focused re-review: APPROVE** — light-mode contrast now 7.5–9.9 (clears AA), focus ring present,
+nits fixed, no regression, token never shown.
+
+`internal/web/dist` stays at the committed placeholder — the M7 build-engineer owns the Nix embed.
+Screenshot policy going forward: commit the verdict .md files + the passing/hero shots; the bulky
+exploration sets (ui-review-1, 19 MB) are gitignored, not committed. Demo-data caveat: the local-
+download focal-hero state dwells <100ms even at 1s polling (small demo files), so that one state is
+snapshot-captured; the put.io-fetch leg now climbs live. Noted for a future richer-demo planner item.
