@@ -5,19 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>plundrio · relaydeck</title>
 <script>
-/* theme + palette resolve BEFORE paint. ?theme= and ?palette= are authoritative.
-   theme: light|dark (else prefers-color-scheme, else dark).
-   palette: tide|ember|ion (else default 'tide'). */
+/* theme + palette resolve BEFORE paint (no flash). Pure client-side browser
+   preference — NOT a daemon setting. Resolution order:
+     mode (light|dark):  ?theme=  >  localStorage 'pldr-mode'  >  prefers-color-scheme  >  dark
+     palette (tide|ember|ion): ?palette=  >  localStorage 'pldr-palette'  >  'ion'
+   ?theme= / ?palette= are authoritative (used to screenshot every combo from one file). */
 (function(){
-  var d=document.documentElement;
+  var d=document.documentElement, MODES={light:1,dark:1}, PALS={tide:1,ember:1,ion:1};
+  function pick(v,set){return (v&&set[v])?v:null;}
   try{
-    var p=new URLSearchParams(location.search);
-    var q=p.get('theme');
-    var t=(q==='light'||q==='dark')?q:(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
-    d.setAttribute('data-theme',t);
-    var pal=p.get('palette');
-    d.setAttribute('data-palette',(pal==='tide'||pal==='ember'||pal==='ion')?pal:'tide');
-  }catch(e){d.setAttribute('data-theme','dark');d.setAttribute('data-palette','tide');}
+    var p=new URLSearchParams(location.search), ls=window.localStorage;
+    var mode = pick(p.get('theme'),MODES)
+            || pick(ls&&ls.getItem('pldr-mode'),MODES)
+            || (window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+    var pal  = pick(p.get('palette'),PALS)
+            || pick(ls&&ls.getItem('pldr-palette'),PALS)
+            || 'ion';
+    d.setAttribute('data-theme',mode);
+    d.setAttribute('data-palette',pal);
+  }catch(e){d.setAttribute('data-theme','dark');d.setAttribute('data-palette','ion');}
 })();
 </script>
 <style>
@@ -30,8 +36,10 @@
    expressed radially), combined % is the big center readout (tarmac's glance).
    The hero dial radial glow has been REMOVED (flat instrument bay; arc/comet
    glows restrained to a crisp edge).  Amber is reserved for restart/caution.
-   PALETTE: selectable via [data-palette] = tide | ember | ion (×[data-theme]),
-   pending operator pick — see the palette token blocks below.
+   THEME = palette (tide | ember | ion) × mode (light | dark) — all three palettes
+   SHIP as user-selectable themes. Default ion + dark; mode honors
+   prefers-color-scheme on first visit; choice persists to localStorage. Pure
+   client-side browser preference, never sent to the daemon.
    ============================================================================ */
 
 /* ============================================================================
@@ -42,7 +50,7 @@
      · tide  — cool marine instrument: slate-teal base, azure put.io, aqua-teal local
      · ember — refined warm graphite: warm charcoal, periwinkle put.io, coral local
      · ion   — restrained near-mono graphite, muted steel put.io, electric indigo local
-   Default palette = tide; default theme = dark.
+   Default palette = ion; default theme = dark (no-JS CSS fallback = ion dark).
    Shared (palette-independent) tokens live in :root below.
    ============================================================================ */
 
@@ -53,10 +61,9 @@
   --r-s:8px; --r-m:12px; --r-l:16px;
 }
 
-/* =======================  PALETTE: TIDE  (default)  ======================= */
+/* =======================  PALETTE: TIDE  ======================= */
 /* cool marine instrument — slate-teal graphite, azure put.io, aqua-teal local */
-:root[data-palette="tide"][data-theme="dark"],
-:root:not([data-palette]){
+:root[data-palette="tide"][data-theme="dark"]{
   --bg:#06090c; --bg-grad-a:rgba(78,163,245,.05); --bg-grad-b:rgba(47,217,192,.045);
   --surf-0:#0a0f15; --surf-1:#0e151c; --surf-2:#121b24; --surf-3:#19242f; --surf-4:#243646;
   --hair:rgba(150,195,215,.08); --hair-2:rgba(150,195,215,.14);
@@ -112,9 +119,10 @@
   --metal-a:#241a12; --metal-b:#5a4a3a;
 }
 
-/* =======================  PALETTE: ION  ======================= */
+/* =======================  PALETTE: ION  (SHIPPING DEFAULT)  ======================= */
 /* restrained near-mono graphite, muted steel put.io, electric indigo local accent */
-:root[data-palette="ion"][data-theme="dark"]{
+:root[data-palette="ion"][data-theme="dark"],
+:root:not([data-palette]){
   --bg:#08090b; --bg-grad-a:rgba(139,151,173,.035); --bg-grad-b:rgba(124,108,255,.06);
   --surf-0:#0c0e11; --surf-1:#111317; --surf-2:#16191e; --surf-3:#1d2128; --surf-4:#2a3038;
   --hair:rgba(190,200,220,.08); --hair-2:rgba(190,200,220,.14);
@@ -180,6 +188,17 @@ body{
 .toggle{display:flex;align-items:center;gap:0;height:32px;border-radius:999px;background:var(--surf-3);box-shadow:inset 0 0 0 1px var(--hair-2);overflow:hidden;cursor:pointer;border:0;padding:0}
 .toggle a{display:grid;place-items:center;width:34px;height:32px;color:var(--ink-3);text-decoration:none;font-size:13px;transition:.15s}
 .toggle a.on{color:var(--ink);background:var(--surf-1);box-shadow:0 0 0 1px var(--hair-2)}
+/* palette picker — three theme swatches; the active one ringed. Pure client-side browser pref. */
+.palpick{display:flex;align-items:center;gap:0;height:32px;border-radius:999px;background:var(--surf-3);box-shadow:inset 0 0 0 1px var(--hair-2);overflow:hidden;padding:0 3px}
+.palpick a{display:grid;place-items:center;width:28px;height:32px;text-decoration:none;transition:.15s}
+.palpick a .sw{width:13px;height:13px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);transition:transform .15s}
+.palpick a:hover .sw{transform:scale(1.12)}
+.palpick a.on .sw{box-shadow:0 0 0 2px var(--surf-3),0 0 0 3.5px currentColor}
+/* swatch fills use each palette's signature put.io->local pair regardless of active palette */
+.palpick a.p-tide{color:#2fd9c0}  .palpick a.p-tide .sw{background:linear-gradient(135deg,#4ea3f5,#2fd9c0)}
+.palpick a.p-ember{color:#ff8a6b} .palpick a.p-ember .sw{background:linear-gradient(135deg,#8aa0d8,#ff8a6b)}
+.palpick a.p-ion{color:#8b7cff}   .palpick a.p-ion .sw{background:linear-gradient(135deg,#8b97ad,#8b7cff)}
+.palpick a:focus-visible{outline:2px solid var(--local);outline-offset:2px;border-radius:999px}
 
 main{max-width:1320px;margin:0 auto;padding:26px 26px 90px}
 .eyebrow{display:flex;align-items:center;gap:14px;margin:0 0 16px}
@@ -365,8 +384,13 @@ footer{margin-top:60px;text-align:center;font-family:var(--mono);font-size:11px;
   <div class="railR">
     <span class="clock num">12:04:52</span>
     <span class="live"><span class="d"></span> STREAM LIVE</span>
-    <div class="toggle" role="group" aria-label="Theme">
-      <a href="?theme=light" id="tL" title="Light">☀</a><a href="?theme=dark" id="tD" title="Dark">☾</a>
+    <div class="palpick" role="group" aria-label="Color theme">
+      <a class="p-tide" data-pal="tide" href="?palette=tide" title="Tide (cool marine)" aria-label="Tide theme"><span class="sw"></span></a>
+      <a class="p-ember" data-pal="ember" href="?palette=ember" title="Ember (warm graphite)" aria-label="Ember theme"><span class="sw"></span></a>
+      <a class="p-ion" data-pal="ion" href="?palette=ion" title="Ion (mono + indigo)" aria-label="Ion theme"><span class="sw"></span></a>
+    </div>
+    <div class="toggle" role="group" aria-label="Light or dark">
+      <a data-mode="light" href="?theme=light" title="Light">☀</a><a data-mode="dark" href="?theme=dark" title="Dark">☾</a>
     </div>
   </div>
 </div>
@@ -562,10 +586,25 @@ footer{margin-top:60px;text-align:center;font-family:var(--mono);font-size:11px;
 </main>
 
 <script>
-/* mark the active theme toggle + keep links sticky to current theme */
+/* picker wiring: mark active mode+palette, make each link preserve the OTHER axis,
+   and persist the choice to localStorage so it survives reloads (the same browser
+   preference the shipping app uses; theme is never sent to the daemon). */
 (function(){
-  var t=document.documentElement.getAttribute('data-theme');
-  document.getElementById(t==='light'?'tL':'tD').classList.add('on');
+  var d=document.documentElement;
+  var mode=d.getAttribute('data-theme'), pal=d.getAttribute('data-palette');
+  var ls; try{ls=window.localStorage;}catch(e){}
+  document.querySelectorAll('.toggle a').forEach(function(a){
+    var m=a.getAttribute('data-mode');
+    a.href='?palette='+pal+'&theme='+m;      // switching mode keeps the current palette
+    if(m===mode)a.classList.add('on');
+    a.addEventListener('click',function(){ if(ls){ls.setItem('pldr-mode',m);} });
+  });
+  document.querySelectorAll('.palpick a').forEach(function(a){
+    var p=a.getAttribute('data-pal');
+    a.href='?palette='+p+'&theme='+mode;     // switching palette keeps the current mode
+    if(p===pal)a.classList.add('on');
+    a.addEventListener('click',function(){ if(ls){ls.setItem('pldr-palette',p);} });
+  });
 })();
 </script>
 </body>

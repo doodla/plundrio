@@ -7,10 +7,11 @@ offline.
 
 ---
 
-## CHOSEN — `relaydeck` (combo of relay + tarmac, light + dark)
+## SHIPPING — `relaydeck` (combo of relay + tarmac; 3 palettes × light/dark)
 
-The operator picked a **combo of `relay` + `tarmac` with full light/dark theme support**. The
-synthesis lives at `mockups/relaydeck/` and the Pass 2 design spec at `mockups/SPEC.md`.
+The operator picked a **combo of `relay` + `tarmac`**, then chose to **ship all three palettes as
+selectable themes**. The synthesis lives at `mockups/relaydeck/` and the finalized Pass 2 design spec
+at `mockups/SPEC.md`.
 
 - **DNA:** tarmac's instrument-console aesthetic (graphite, precise, cockpit-legible) as the base.
 - **Fused hero — the flow-gauge:** ONE 270° instrument that is both a glanceable combined-% dial
@@ -18,29 +19,32 @@ synthesis lives at `mockups/relaydeck/` and the Pass 2 design spec at `mockups/S
   local arc (the accent), a comet head riding the active leg's leading edge, combined % in the
   center. Mini version per fleet row.
 
-**Review status:** layout + fused hero + structure **APPROVED**. Two fixes applied:
+**Status: FINALIZED.** Layout + fused hero + structure approved; two fixes shipped:
 1. **Hero dial glow removed** (the radial bloom under the gauge read as out of place) — the gauge bay
-   is now a flat instrument surface; arc/comet glows restrained to a crisp edge.
-2. **Palette in review.** The original chartreuse/steel palette was rejected ("colors not that
-   good"). Three recolor candidates are now selectable for the operator to pick from — **same layout,
-   same hero, only the color system changes.** SPEC §2 palette tokens are held as *pending pick*.
+   is now a flat instrument surface; arc/comet glows restrained to a crisp edge sheen.
+2. **All three palettes ship as user-selectable themes** (operator: "ship with themes" — same
+   structure, pick is up to the user). The theme system is **palette × mode**.
 
-### Palette candidates (pick one)
+### Theme system — palette × mode (all three ship)
 
-| Slug | Mood (one line) |
+| Palette | Mood (one line) |
 |------|-----------------|
-| `tide`  | Cool marine instrument — slate-teal graphite, azure put.io handing off to aqua-teal local; clinical, oceanic. |
-| `ember` | Refined warm graphite — warm charcoal, cool periwinkle put.io handing off to warm coral local (cool→warm reinforces the journey); confident, warm. |
-| `ion`   | Restrained near-monochrome graphite with one bold electric-indigo accent; muted steel put.io recedes, indigo local pops; premium dev-tool. |
+| `tide`  | Cool marine instrument — slate-teal graphite, azure put.io → aqua-teal local; clinical, oceanic. |
+| `ember` | Refined warm graphite — warm charcoal, periwinkle put.io → coral local (cool→warm reinforces the journey); confident, warm. |
+| `ion` *(default)* | Restrained near-monochrome graphite + one bold electric-indigo accent; muted steel put.io recedes, indigo local pops; premium dev-tool. |
 
-All three are committed in **both** light and dark, keep the put.io/local phase distinction legible
-in every combo, and reserve amber for semantic state (restart/caution) so the accent never collides
-with state meaning. Default palette = `tide`.
+Each is committed in **both** light and dark, keeps the put.io/local phase distinction legible in
+every combo, and reserves amber for semantic state (restart/caution) so the accent never collides
+with state meaning. **Default `ion` + `dark`**; mode honors `prefers-color-scheme` on first visit;
+palette + mode persist to `localStorage`; resolved before first paint. A **palette picker** (3
+swatches) sits beside the **light/dark toggle** in the rail. Theme is a pure client-side browser
+preference — **not** a daemon setting. Exact locked token values for all six combos live in
+`SPEC.md` §2.
 
-### Files to screenshot (palette × theme)
+### Files to screenshot (palette × mode)
 
-`relaydeck/index.html` honors `?palette=` and `?theme=` (both resolved before paint), so the one file
-captures every combo. Capture each at desktop (1320px); add mobile (390px) for the leading pick.
+`relaydeck/index.html` honors `?palette=` and `?theme=` (both authoritative, resolved before paint),
+so the one file captures every combo. Desktop 1320px; add mobile 390px for the default + a light one.
 
 ```
 file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=tide&theme=dark
@@ -51,8 +55,8 @@ file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.htm
 file:///Users/doodla/Code/plundrio/.agents/dashboard/mockups/relaydeck/index.html?palette=ion&theme=light
 ```
 
-Open via `file://` (offline). `?palette=` and `?theme=` are authoritative; without them, defaults are
-`palette=tide`, theme from `prefers-color-scheme` then dark.
+Open via `file://` (offline). `?palette=`/`?theme=` are authoritative; without them the defaults are
+`palette=ion` and mode from `prefers-color-scheme` (then `dark`).
 
 ---
 
