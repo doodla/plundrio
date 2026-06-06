@@ -252,6 +252,13 @@ var runCmd = &cobra.Command{
 			defer demoClient.Stop()
 			client = demoClient
 			cfg.FolderID = demoFolderID
+			// Poll fast in demo mode so the dashboard shows transfers climbing
+			// live through put.io-fetch → local-download instead of jumping
+			// queued→completed between the production 30s polls (the demo virtual
+			// clock advances ~8x, so a 30s poll skips the whole fetch phase).
+			if cfg.TransferCheckInterval == 0 {
+				cfg.TransferCheckInterval = 1 * time.Second
+			}
 		} else {
 			realClient := api.NewClient(cfg.OAuthToken)
 

@@ -104,6 +104,13 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 	// Get default download configuration
 	dlConfig := GetDefaultConfig()
 
+	// Override the poll cadence from config when set (>0). Zero keeps the
+	// package default (30s) so production behavior is unchanged; demo mode sets
+	// it low so the dashboard shows live two-phase progress.
+	if cfg.TransferCheckInterval > 0 {
+		dlConfig.TransferCheckInterval = cfg.TransferCheckInterval
+	}
+
 	// Override with user config if provided
 	workerCount := cfg.WorkerCount
 	if workerCount <= 0 {

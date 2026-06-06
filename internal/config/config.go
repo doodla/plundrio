@@ -46,6 +46,15 @@ type Config struct {
 	// WorkerCount is the number of concurrent download workers (default: 4).
 	WorkerCount int `mapstructure:"workers"`
 
+	// TransferCheckInterval is how often the download manager polls put.io for
+	// transfer state. Zero means "use the package default" (30s — production
+	// behavior, unchanged). It exists primarily so demo mode can poll fast
+	// (~1-2s) and the live dashboard actually shows transfers climbing through
+	// the put.io-fetch → local-download phases instead of jumping
+	// queued→completed between slow polls. download.New applies it only when
+	// >0, so a default-constructed Config keeps the 30s cadence.
+	TransferCheckInterval time.Duration `mapstructure:"transfer_check_interval"`
+
 	// DownloadStartWindow optionally restricts when new local downloads may start.
 	DownloadStartWindow DownloadStartWindowConfig `mapstructure:"download_start_window"`
 
