@@ -86,3 +86,31 @@ M4–M6 role files (backend-builder, code-reviewer, build-engineer, integration-
 contract is frozen; frontend-builder + ui-reviewer remain deferred until the operator picks a design.
 
 State: M0 ✓, M1 ✓ (gate passed). M3 ux-designer running (mockups). Launching M2 harness-builder next.
+
+## 2026-06-06 — M2 done; M3 operator gate REJECTED round 1; agent-loop revision #2 (ux-designer)
+
+M2 harness-builder delivered all four instruments (demo mode, contract prober, snapshot tool, log
+helper), self-tested, repo green; committed. Added a `--full` page-capture mode to the snapshot tool
+(the mockups are long scroll pages). Rendered all three round-1 directions full-page and surfaced
+them to the operator.
+
+**Operator gate result: REJECTED.** All three directions (`console`, `studio`, `horizon`) were called
+**"generic"** — competent but templatey (stock card grids, conventional dashboard chrome). Clarified
+the target: **premium-minimal craft (Linear/Raycast/Vercel-grade) as the foundation, with
+expressive/bold moments** — a committed color POV, large confident typography, and the two-phase
+progress elevated into a designed hero element.
+
+**Agent-loop revision #2 — `roles/ux-designer.md` substantially rewritten** (the miss was the brief:
+the old role asked for "polished" + "distinct directions" but never demanded a real visual identity
+or forbade the admin-template look). The role now: locks the aesthetic target; frames the run as a
+REDO requiring a step change past the rejected set; adds a concrete craft bar (intentional type
+scale + display numerals, committed palette, material/depth discipline, the two-phase progress as THE
+hero); an explicit Forbidden list naming exactly what "generic" meant; and a reference-caliber clause.
+Round-1 mockups kept as the anti-pattern reference. Re-running as a FRESH spawn from the revised file
+(source-of-truth discipline; avoids anchoring on its own generic round-1 output).
+
+**Parallelization decision:** the design bounce blocks only the frontend. Launching `backend-builder`
+(M4) NOW in parallel — it builds the daemon API/SSE/config/log/worker changes against the FROZEN
+contract + design.md, with the M2 harness (demo mode + prober) as its test substrate. Zero dependency
+on the visual mockups; the contract is stable (round-1 designer confirmed no amendment needed, and a
+craft-level redesign uses the same four surfaces + same data). This recovers the bounce's wall-clock.
