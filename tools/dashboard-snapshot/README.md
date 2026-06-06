@@ -19,7 +19,7 @@ built-ins only. The mockups inline their CSS, so nothing touches the network.
 ## Invocation
 
 ```bash
-node tools/dashboard-snapshot/snapshot.mjs <target> <label> [--selector <css>] [--settle <ms>]
+node tools/dashboard-snapshot/snapshot.mjs <target> <label> [--selector <css>] [--settle <ms>] [--full]
 ```
 
 - `<target>` — a URL (`http://…`) or a local path / `file://` to an HTML file.
@@ -28,19 +28,25 @@ node tools/dashboard-snapshot/snapshot.mjs <target> <label> [--selector <css>] [
   live SPA; mockups need only the load event). Optional.
 - `--settle <ms>` — extra wait after load/selector before capture (fonts,
   transitions). Default `400`.
+- `--full` — capture the **entire scroll height** instead of just the breakpoint
+  viewport. Use it for the long single-scroll mockups (account → transfers →
+  logs → settings stacked) so the operator sees each direction's whole design,
+  not just the fold. Opt-in: the **default is viewport-only**, which is what the
+  live SPA e2e wants. Height is capped at 20000px.
 
-Writes `<label>/desktop.png` (1440×900) and `<label>/mobile.png` (390×844 @2x).
-Exits non-zero with a message on failure, including a blank-PNG guard (capture
-smaller than 256 bytes fails).
+Writes `<label>/desktop.png` and `<label>/mobile.png`. Default heights are the
+viewport (1440×900 / 390×844 @2x); with `--full` the height is the measured
+content height (width unchanged). Exits non-zero with a message on failure,
+including a blank-PNG guard (capture smaller than 256 bytes fails).
 
 ## Examples
 
 ```bash
-# A mockup (static, offline):
+# A long single-scroll mockup — full page so all four surfaces are captured:
 node tools/dashboard-snapshot/snapshot.mjs \
-  .agents/dashboard/mockups/console/index.html console
+  .agents/dashboard/mockups/console/index.html console --full
 
-# The live demo-mode dashboard (M6), waiting for a transfer row to render:
+# The live demo-mode dashboard (M6), viewport-only, waiting for a transfer row:
 node tools/dashboard-snapshot/snapshot.mjs \
   http://127.0.0.1:9092/ e2e --selector "[data-transfer-row]" --settle 800
 ```

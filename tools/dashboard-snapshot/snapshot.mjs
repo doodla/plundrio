@@ -18,7 +18,7 @@
 //   - Chrome  : any recent stable. Verified on Google Chrome 149 (headless=new).
 //
 // Usage:
-//   node tools/dashboard-snapshot/snapshot.mjs <target> <label> [--selector <css>] [--settle <ms>]
+//   node tools/dashboard-snapshot/snapshot.mjs <target> <label> [--selector <css>] [--settle <ms>] [--full]
 //
 //   <target>   a URL (http://…) or a local path / file:// to an HTML file.
 //   <label>    subdirectory under .agents/dashboard/screenshots/ to write into.
@@ -26,10 +26,16 @@
 //              live SPA; mockups need only the load event). Optional.
 //   --settle   extra milliseconds to wait after load/selector before capture
 //              (lets transitions/fonts settle). Default 400.
+//   --full     capture the ENTIRE scroll height, not just the breakpoint
+//              viewport. For the long single-scroll M3 mockups (account →
+//              transfers → logs → settings stacked) so the operator sees each
+//              direction's whole design. Opt-in: the DEFAULT stays viewport-only
+//              because the live SPA e2e wants a fixed-viewport shot. Height is
+//              capped at 20000px so a runaway page can't produce a monster PNG.
 //
 // Examples:
 //   node tools/dashboard-snapshot/snapshot.mjs \
-//     .agents/dashboard/mockups/console/index.html console
+//     .agents/dashboard/mockups/console/index.html console --full
 //   node tools/dashboard-snapshot/snapshot.mjs \
 //     http://127.0.0.1:9092/ e2e --selector "[data-transfer-row]" --settle 800
 //
@@ -48,6 +54,10 @@ const BREAKPOINTS = [
   { name: "mobile", width: 390, height: 844, scale: 2, mobile: true }, // iPhone 12-ish
 ];
 
+// MAX_FULL_HEIGHT caps a --full capture's CSS height so a runaway / accidentally
+// infinite-scroll page can't produce a monster PNG.
+const MAX_FULL_HEIGHT = 20000;
+
 // Repo root = three levels up from this file (tools/dashboard-snapshot/snapshot.mjs).
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -60,16 +70,17 @@ function die(msg) {
 
 function parseArgs(argv) {
   const positional = [];
-  const opts = { selector: null, settle: 400 };
+  const opts = { selector: null, settle: 400, full: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--selector") opts.selector = argv[++i];
     else if (a === "--settle") opts.settle = parseInt(argv[++i], 10);
+    else if (a === "--full") opts.full = true;
     else if (a.startsWith("--")) die(`unknown flag ${a}`);
     else positional.push(a);
   }
   if (positional.length < 2) {
-    die("usage: snapshot.mjs <target-url-or-path> <label> [--selector css] [--settle ms]");
+    die("usage: snapshot.mjs <target-url-or-path> <label> [--selector css] [--settle ms] [--full]");
   }
   return { target: positional[0], label: positional[1], ...opts };
 }
@@ -191,9 +202,14 @@ class CDP {
 }
 
 // captureBreakpoint navigates a fresh page at one breakpoint and returns the
-// screenshot bytes. A new target per breakpoint keeps viewport/emulation state
-// from leaking between captures.
-async function captureBreakpoint(browser, url, bp, { selector, settle }) {
+// screenshot bytes plus the captured CSS dimensions. A new target per breakpoint
+// keeps viewport/emulation state from leaking between captures.
+//
+// With `full`, the capture spans the page's entire scroll height (for the long
+// single-scroll mockups) via captureBeyondViewport + a clip sized to the
+// measured content height, capped at MAX_FULL_HEIGHT. Without it, the capture is
+// viewport-only (the default — the live SPA e2e wants a fixed-viewport shot).
+async function captureBreakpoint(browser, url, bp, { selector, settle, full }) {
   // Create a page target and attach a flat session to it.
   const { targetId } = await browser.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await browser.send("Target.attachToTarget", { targetId, flatten: true });
@@ -223,10 +239,43 @@ async function captureBreakpoint(browser, url, bp, { selector, settle }) {
   // Settle delay for fonts/transitions.
   await sleep(settle);
 
-  const { data } = await sess.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+  const shotParams = { format: "png", captureBeyondViewport: false };
+  let height = bp.height;
+
+  if (full) {
+    height = await fullContentHeight(sess, bp.height);
+    shotParams.captureBeyondViewport = true;
+    shotParams.clip = { x: 0, y: 0, width: bp.width, height, scale: bp.scale };
+  }
+
+  const { data } = await sess.send("Page.captureScreenshot", shotParams);
 
   await browser.send("Target.closeTarget", { targetId });
-  return Buffer.from(data, "base64");
+  return { png: Buffer.from(data, "base64"), width: bp.width, height };
+}
+
+// fullContentHeight measures the page's full scroll height at the current
+// breakpoint width, falling back to Page.getLayoutMetrics if the DOM read comes
+// back unusable. Clamped to [fallback, MAX_FULL_HEIGHT].
+async function fullContentHeight(sess, fallback) {
+  let h = 0;
+
+  // Primary: the document's scrollHeight (the full laid-out content height).
+  const expr =
+    "Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)";
+  const { result } = await sess.send("Runtime.evaluate", { expression: expr, returnByValue: true });
+  if (result && typeof result.value === "number") h = result.value;
+
+  // Secondary: cssContentSize from the layout metrics, in case the DOM read was
+  // 0 (e.g. a body-less document).
+  if (!h || h <= 0) {
+    const metrics = await sess.send("Page.getLayoutMetrics");
+    const css = metrics && metrics.cssContentSize;
+    if (css && typeof css.height === "number") h = Math.ceil(css.height);
+  }
+
+  if (!h || h <= 0) h = fallback;
+  return Math.min(Math.max(Math.ceil(h), fallback), MAX_FULL_HEIGHT);
 }
 
 async function waitForSelector(sess, selector, timeoutMs) {
@@ -243,7 +292,7 @@ async function waitForSelector(sess, selector, timeoutMs) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
-  const { target, label, selector, settle } = parseArgs(process.argv.slice(2));
+  const { target, label, selector, settle, full } = parseArgs(process.argv.slice(2));
   const url = await resolveTargetURL(target);
   const chromePath = findChrome();
 
@@ -255,12 +304,12 @@ async function main() {
   try {
     browser = await CDP.connect(wsURL);
     for (const bp of BREAKPOINTS) {
-      const png = await captureBreakpoint(browser, url, bp, { selector, settle });
+      const { png, width, height } = await captureBreakpoint(browser, url, bp, { selector, settle, full });
       const outPath = join(outDir, `${bp.name}.png`);
       await writeFile(outPath, png);
       const { size } = await stat(outPath);
       if (size < 256) throw new Error(`captured ${bp.name}.png is suspiciously small (${size} bytes) — likely blank`);
-      console.log(`wrote ${outPath} (${bp.width}x${bp.height}, ${size} bytes)`);
+      console.log(`wrote ${outPath} (${width}x${height}${full ? " full-page" : ""}, ${size} bytes)`);
     }
   } finally {
     if (browser) browser.close();
