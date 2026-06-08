@@ -48,8 +48,8 @@
           : 'downloading locally';
       case 'completed':
         return t.local_phase
-          ? `completed · source cleaned · ${t.local_phase.completed_files}/${t.local_phase.total_files} files`
-          : 'completed · source cleaned';
+          ? `completed · ${t.local_phase.completed_files}/${t.local_phase.total_files} files`
+          : 'completed';
       case 'failed':
         return t.permanent ? 'failed · gave up after retries' : 'failed · put.io error';
     }

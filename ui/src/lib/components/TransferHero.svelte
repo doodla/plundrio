@@ -109,8 +109,8 @@
           </div>
           <div class="v2">{humanBytes(lp.downloaded)} landed</div>
         {:else if state === 'completed'}
-          <div class="v"><b>done</b> · source cleaned</div>
-          <div class="v2">files on disk</div>
+          <div class="v"><b>done</b></div>
+          <div class="v2">complete on put.io</div>
         {:else}
           <div class="v"><b>—</b></div>
           <div class="v2">not started</div>

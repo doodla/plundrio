@@ -117,8 +117,8 @@ internal/
 3. **Monitoring**: `Manager.monitorTransfers()` polls put.io every 30s, `TransferProcessor.checkTransfers()` categorizes transfers by status
 4. **Download**: Ready transfers get files queued as `downloadJob`s, processed by worker pool via `grab` library
 5. **Coordination**: `TransferCoordinator` tracks lifecycle states (Initial -> Downloading -> Completed -> Processed), `TransferContext` holds per-transfer state
-6. **Cleanup**: On completion, cleanup hook deletes source file from put.io but keeps transfer record for *arr visibility
-7. **torrent-remove**: *arr app requests removal; plundrio deletes put.io file + transfer
+6. **Mark Processed**: On local completion the transfer is marked `Processed` and **kept** (reported as 100%/Seeding) so the *arr app can still observe it. The put.io source is **not** deleted here — the cleanup hook only clears retry state.
+7. **Purge**: `Manager.PurgeTransfer` (the only `DeleteFile` caller) deletes the put.io file + transfer record and drops it from tracking — fired by `torrent-remove` (the happy path) or, if the client never removes it, by the retention janitor after `post_complete_retention`.
 
 ### Progress Reporting
 
@@ -126,7 +126,7 @@ Progress is split 50/50: put.io download (0-50%) + local download (50-100%). Thi
 
 ### Transfer Lifecycle States
 
-`TransferLifecycleState` in `types.go`: Initial -> Downloading -> Completed -> Processed (or Failed/Cancelled). The "Processed" state means files are downloaded and put.io source cleaned up; the transfer record stays for *arr to query until `torrent-remove`.
+`TransferLifecycleState` in `types.go`: Initial -> Downloading -> Completed -> Processed (or Failed/Cancelled). The "Processed" state means the local download finished and the transfer is **retained** (reported as 100%/Seeding) for *arr to observe — the put.io source is **not** deleted at this point. `Manager.PurgeTransfer` (the only `DeleteFile` caller) removes the put.io file + record later, on `torrent-remove` or after `post_complete_retention`. So a still-visible "completed" transfer's put.io source has NOT been cleaned — purged transfers drop out of tracking entirely.
 
 ### Key Types
 
