@@ -34,13 +34,13 @@ func TestContractAgainstDemoServer(t *testing.T) {
 	defer demoClient.Stop()
 
 	cfg := &config.Config{
-		TargetDir:       targetDir,
-		PutioFolder:     "demo",
-		FolderID:        demoFolderID,
-		OAuthToken:      contractprobe.DemoTokenSentinel,
-		ListenAddr:      ":9091",
-		DashboardListen: "127.0.0.1:0", // ephemeral
-		WorkerCount:     2,
+		TargetDir:     targetDir,
+		PutioFolder:   "demo",
+		FolderID:      demoFolderID,
+		OAuthToken:    contractprobe.DemoTokenSentinel,
+		ListenAddr:    ":9091",
+		DashboardAddr: "127.0.0.1:0", // ephemeral
+		WorkerCount:   2,
 	}
 
 	mgr := download.New(cfg, demoClient)

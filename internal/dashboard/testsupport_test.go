@@ -72,11 +72,11 @@ func (f *fakeAccountClient) GetAccountInfo(ctx context.Context) (*putio.AccountI
 // via httptest.
 func newTestDashboard(svc Service, acc AccountClient, overridesPath string) *Dashboard {
 	cfg := &config.Config{
-		TargetDir:       "/tmp/plundrio-dash-test",
-		PutioFolder:     "plundrio",
-		ListenAddr:      ":9091",
-		DashboardListen: ":0",
-		WorkerCount:     4,
+		TargetDir:     "/tmp/plundrio-dash-test",
+		PutioFolder:   "plundrio",
+		ListenAddr:    ":9091",
+		DashboardAddr: ":0",
+		WorkerCount:   4,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dashboard{

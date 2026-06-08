@@ -9,7 +9,7 @@
   import { putSettings, ApiRequestError } from '../util/api';
 
   const LOG_LEVELS = ['debug', 'info', 'warn', 'error', 'fatal', 'none'];
-  const TEXT_KEYS = ['target', 'folder', 'listen', 'dashboard_listen'];
+  const TEXT_KEYS = ['target', 'folder', 'listen', 'dashboard_addr'];
 
   // Draft holds in-progress edits keyed by setting key. Absent = unchanged.
   let draft = $state<Record<string, string | number>>({});
@@ -128,7 +128,7 @@
         return 'put.io folder · restart required to re-scope';
       case 'listen':
         return 'Transmission RPC bind · restart required';
-      case 'dashboard_listen':
+      case 'dashboard_addr':
         return "this dashboard's bind · restart required";
       case 'token':
         return 'value never read back, only replaced';
@@ -204,7 +204,7 @@
     </div>
   {/if}
 
-  <!-- text keys: target / folder / listen / dashboard_listen -->
+  <!-- text keys: target / folder / listen / dashboard_addr -->
   {#each TEXT_KEYS as key (key)}
     {@const e = entry(key)}
     {#if e}

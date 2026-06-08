@@ -1,12 +1,12 @@
 // Package dashboard is the daemon's second, read-mostly HTTP face: a static
 // Svelte SPA plus a small REST API and an SSE stream, served on its own listener
-// (cfg.DashboardListen) separate from the RPC :9091. It reads the same Manager
+// (cfg.DashboardAddr) separate from the RPC :9091. It reads the same Manager
 // and put.io client the RPC server already holds — no second put.io client, no
 // duplicate state — tees the existing zerolog stream to SSE subscribers, and
 // writes a small JSON overrides file layered on top of viper. The RPC path, the
 // OAuth token, and the download engine's invariants are untouched.
 //
-// Default-off: main.go constructs a Dashboard only when DashboardListen != "".
+// Default-off: main.go constructs a Dashboard only when cfg.Dashboard is true.
 // A ListenAndServe error is logged and returned (never log.Fatal) so a failed
 // dashboard never takes down the load-bearing RPC path.
 package dashboard
@@ -85,7 +85,7 @@ func New(cfg *config.Config, account AccountClient, svc Service, overridesPath s
 	d.registerRoutes(mux)
 
 	d.srv = &http.Server{
-		Addr:    cfg.DashboardListen,
+		Addr:    cfg.DashboardAddr,
 		Handler: mux,
 		// This is a NEW bind, so the CLAUDE.md slowloris note applies — set the
 		// header timeout here even though :9091 deliberately omits it. We are
@@ -149,7 +149,7 @@ func (d *Dashboard) staticHandler() http.Handler {
 	})
 }
 
-// Start binds the listener on cfg.DashboardListen and serves until Stop. It
+// Start binds the listener on cfg.DashboardAddr and serves until Stop. It
 // binds explicitly (net.Listen + srv.Serve, not ListenAndServe) so the resolved
 // address is observable via Addr — necessary for an ephemeral ":0" bind in
 // tests. A clean Stop's http.ErrServerClosed is normalized to nil; main.go logs

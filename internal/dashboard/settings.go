@@ -44,7 +44,7 @@ var settingsMeta = []settingMeta{
 	{key: "target", live: false, flagDefault: ""},
 	{key: "folder", live: false, flagDefault: "plundrio"},
 	{key: "listen", live: false, flagDefault: ":9091"},
-	{key: "dashboard_listen", live: false, flagDefault: ""},
+	{key: "dashboard_addr", live: false, flagDefault: ":9092"},
 	{key: "token", live: false, flagDefault: "", isToken: true},
 }
 
@@ -117,8 +117,8 @@ func (d *Dashboard) resolvedValue(m settingMeta, ov config.Overrides, locked, in
 		return d.cfg.PutioFolder
 	case "listen":
 		return d.cfg.ListenAddr
-	case "dashboard_listen":
-		return d.cfg.DashboardListen
+	case "dashboard_addr":
+		return d.cfg.DashboardAddr
 	}
 	return nil
 }
@@ -155,13 +155,13 @@ func (d *Dashboard) handleSettings(w http.ResponseWriter, r *http.Request) {
 // settingsPutRequest is the PUT body. Pointers distinguish "absent" (don't
 // change) from a zero value.
 type settingsPutRequest struct {
-	LogLevel        *string `json:"log_level"`
-	Workers         *int    `json:"workers"`
-	Target          *string `json:"target"`
-	Folder          *string `json:"folder"`
-	Listen          *string `json:"listen"`
-	DashboardListen *string `json:"dashboard_listen"`
-	Token           *string `json:"token"`
+	LogLevel      *string `json:"log_level"`
+	Workers       *int    `json:"workers"`
+	Target        *string `json:"target"`
+	Folder        *string `json:"folder"`
+	Listen        *string `json:"listen"`
+	DashboardAddr *string `json:"dashboard_addr"`
+	Token         *string `json:"token"`
 }
 
 // handleSettingsPut validates, persists, and live-applies a settings edit.
@@ -242,11 +242,11 @@ func (d *Dashboard) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 			updates["listen"] = *req.Listen
 		}
 	}
-	if req.DashboardListen != nil && verr == nil {
-		if !validHostPort(*req.DashboardListen) {
-			verr = &fieldErr{codeValidationFailed, "dashboard_listen must parse as host:port", "dashboard_listen"}
-		} else if checkLocked("dashboard_listen") {
-			updates["dashboard_listen"] = *req.DashboardListen
+	if req.DashboardAddr != nil && verr == nil {
+		if !validHostPort(*req.DashboardAddr) {
+			verr = &fieldErr{codeValidationFailed, "dashboard_addr must parse as host:port", "dashboard_addr"}
+		} else if checkLocked("dashboard_addr") {
+			updates["dashboard_addr"] = *req.DashboardAddr
 		}
 	}
 	if req.Token != nil && verr == nil {

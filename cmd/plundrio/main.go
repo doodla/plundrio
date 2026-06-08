@@ -41,7 +41,8 @@ var flagViperBindings = map[string]string{
 	"workers":                 "workers",
 	"post-complete-retention": "post_complete_retention",
 	"log-level":               "log_level",
-	"dashboard-listen":        "dashboard_listen",
+	"dashboard":               "dashboard",
+	"dashboard-addr":          "dashboard_addr",
 }
 
 var (
@@ -308,18 +309,18 @@ var runCmd = &cobra.Command{
 		}()
 
 		// Initialize and start the web dashboard listener, if configured.
-		// Default-off: when DashboardListen is empty nothing is constructed, so
+		// Default-off: when --dashboard is false nothing is constructed, so
 		// the dashboard adds zero surface. Unlike the RPC server above, a
 		// dashboard ListenAndServe error logs Error and returns — it must NOT
 		// log.Fatal, which would kill the daemon and take down the load-bearing
 		// RPC path. The dashboard is a second, non-load-bearing face.
 		var dash *dashboard.Dashboard
-		if cfg.DashboardListen != "" {
+		if cfg.Dashboard {
 			overridesPath := resolveOverridesPath(cmd, cfg.TargetDir)
 			dash = dashboard.New(cfg, client, dlManager, overridesPath)
 			go func() {
 				log.Info("dashboard").
-					Str("addr", cfg.DashboardListen).
+					Str("addr", cfg.DashboardAddr).
 					Msg("Starting web dashboard")
 				if err := dash.Start(); err != nil {
 					log.Error("dashboard").Err(err).Msg("Dashboard server error (RPC path unaffected)")
@@ -484,7 +485,8 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
-	cmd.Flags().String("dashboard-listen", "", "Address for the web dashboard HTTP listener (e.g. :9092). Empty disables the dashboard. Also via PLDR_DASHBOARD_LISTEN.")
+	cmd.Flags().Bool("dashboard", false, "Enable the web dashboard (default off). Also via PLDR_DASHBOARD=true.")
+	cmd.Flags().String("dashboard-addr", ":9092", "Address the web dashboard binds when enabled. Also via PLDR_DASHBOARD_ADDR.")
 	cmd.Flags().String("overrides-file", "", "Path to the runtime-overrides JSON file (default <target>/.plundrio-overrides.json). Also via PLDR_OVERRIDES_FILE.")
 	cmd.Flags().Bool("demo", false, "Run with a fake in-process put.io client serving synthetic data (also via PLDR_DEMO=1). For dashboard development/screenshots; never touches a real account or token.")
 }

@@ -11,7 +11,7 @@ import (
 )
 
 // OverrideKeys are the canonical viper keys the runtime-overrides file may
-// carry. They match the mapstructure tags on Config plus dashboard_listen, and
+// carry. They match the mapstructure tags on Config plus dashboard_addr, and
 // are the only keys ApplyOverrides will push into viper / WriteOverride will
 // persist. Anything else in the file is ignored (a forward-compat guard: an
 // older daemon reading a newer file's key it doesn't understand just skips it).
@@ -21,7 +21,7 @@ var OverrideKeys = []string{
 	"target",
 	"folder",
 	"listen",
-	"dashboard_listen",
+	"dashboard_addr",
 }
 
 // overrideKeySet is OverrideKeys as a lookup set: the keys ApplyOverrides layers

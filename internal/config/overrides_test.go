@@ -192,8 +192,8 @@ func TestIsEnvPinned(t *testing.T) {
 }
 
 func TestEnvVarFor(t *testing.T) {
-	if got := EnvVarFor("dashboard_listen"); got != "PLDR_DASHBOARD_LISTEN" {
-		t.Errorf("EnvVarFor(dashboard_listen) = %q, want PLDR_DASHBOARD_LISTEN", got)
+	if got := EnvVarFor("dashboard_addr"); got != "PLDR_DASHBOARD_ADDR" {
+		t.Errorf("EnvVarFor(dashboard_addr) = %q, want PLDR_DASHBOARD_ADDR", got)
 	}
 }
 
