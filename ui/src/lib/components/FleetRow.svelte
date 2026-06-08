@@ -65,7 +65,7 @@
   const metaTopClass = $derived(state === 'completed' ? 'green' : state === 'failed' ? 'red' : '');
   function buildMetaTop(t: Transfer, s: DisplayState, isAct: boolean): string {
     if (s === 'completed') return 'done';
-    if (s === 'failed') return 'frozen';
+    if (s === 'failed') return 'failed';
     if (s === 'queued') return humanBytes(t.size);
     const rate =
       s === 'local-downloading' ? (t.local_phase?.rate_download ?? 0) : t.putio_phase.rate_download;

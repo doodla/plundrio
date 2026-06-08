@@ -77,12 +77,12 @@
       <div class="lg p1 muted">
         <div class="k"><i></i> put.io fetch</div>
         <div class="v"><b>{putioPct}%</b> · {humanBytes(transfer.putio_phase.downloaded)}</div>
-        <div class="v2">fetched</div>
+        <div class="v2">{putioPct >= 100 ? 'fetched' : 'fetch interrupted'}</div>
       </div>
       <div class="lg p2">
         <div class="k"><i></i> local download</div>
         <div class="v" style="color:var(--red-ink)">
-          <b style="color:var(--red-ink)">frozen</b> at {localPct}%
+          <b style="color:var(--red-ink)">stopped</b> at {localPct}%
         </div>
         <div class="v2" style="color:var(--red-ink)">
           {transfer.error_string || 'permanent failure'}
@@ -98,7 +98,9 @@
           <div class="v2">waiting for put.io</div>
         {:else}
           <div class="v"><b>{putioPct}%</b> · {humanBytes(transfer.putio_phase.downloaded)}</div>
-          <div class="v2">{p1Muted ? 'fetched, handed off' : 'fetching'}</div>
+          <div class="v2">
+            {p1Muted ? (putioPct >= 100 ? 'fetched, handed off' : 'handed off') : 'fetching'}
+          </div>
         {/if}
       </div>
       <div class="lg p2" class:muted={p2Muted}>

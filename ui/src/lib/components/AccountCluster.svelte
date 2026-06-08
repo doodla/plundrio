@@ -28,7 +28,6 @@
   <div class="gid">
     <div class="av">{initial}</div>
     <div class="who">{account?.username ?? '—'}<small>put.io account</small></div>
-    <div class="plan">unlimited</div>
   </div>
 
   <div class="inst">
