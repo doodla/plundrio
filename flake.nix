@@ -71,6 +71,19 @@
               description = "Log level";
             };
 
+            dashboard = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Enable the web dashboard HTTP listener (default off).";
+            };
+
+            dashboardAddr = lib.mkOption {
+              type = lib.types.str;
+              default = ":9092";
+              description = "Address the web dashboard binds when enabled.";
+              example = "127.0.0.1:9092";
+            };
+
             user = lib.mkOption {
               type = lib.types.str;
               default = "plundrio";
@@ -122,7 +135,7 @@
                     --folder ${lib.escapeShellArg cfg.putioFolder} \
                     --listen ${lib.escapeShellArg cfg.listenAddr} \
                     --workers ${toString cfg.workerCount} \
-                    --log-level ${cfg.logLevel}
+                    --log-level ${cfg.logLevel}${lib.optionalString cfg.dashboard " --dashboard --dashboard-addr ${lib.escapeShellArg cfg.dashboardAddr}"}
                 '';
                 Environment = [
                   "PLDR_TOKEN_FILE=%d/token"
