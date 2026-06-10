@@ -43,6 +43,7 @@ put.io essentially performs the same download process.
   - [5. Configure Your \*arr Application](#5-configure-your-arr-application)
 - [⚙️ Configuration](#️-configuration)
   - [Configuration Priority](#configuration-priority)
+- [🌐 Web Dashboard](#-web-dashboard)
 - [🔌 Configuring \*arr Applications](#-configuring-arr-applications)
 - [🎮 Commands](#-commands)
   - [Run the download manager](#run-the-download-manager)
@@ -261,6 +262,8 @@ export PLDR_DOWNLOAD_START_WINDOW_ENABLED=true
 export PLDR_DOWNLOAD_START_WINDOW_START=23:00
 export PLDR_DOWNLOAD_START_WINDOW_END=05:00
 export PLDR_LOG_LEVEL=info
+export PLDR_DASHBOARD=true              # enable the web dashboard (default off)
+export PLDR_DASHBOARD_ADDR=:9092        # dashboard bind address (default :9092)
 ```
 
 ### Configuration Priority
@@ -275,6 +278,41 @@ Configuration values are loaded in the following order, with later sources overr
 💡 **Security Note**: Store OAuth tokens in environment variables rather than config files or command-line arguments for better security.
 
 For systemd-managed deployments (including the bundled NixOS module), set `PLDR_TOKEN_FILE=/path/to/token` instead of `PLDR_TOKEN`. plundrio reads the file at startup and trims trailing whitespace, which lets the token live in `LoadCredential` rather than the unit's `Environment=`. If both `PLDR_TOKEN` and `PLDR_TOKEN_FILE` are set, the explicit token wins.
+
+## 🌐 Web Dashboard
+
+plundrio bundles an optional web dashboard — live transfers with two-phase progress (put.io fetch → local download), account/quota, a live-streaming log viewer, and an editable settings view. It is compiled into the same binary (no separate image or sidecar) and is **off by default**.
+
+Enable it with `--dashboard` (or `PLDR_DASHBOARD=true`). It binds `:9092` by default; relocate with `--dashboard-addr` / `PLDR_DASHBOARD_ADDR`. The dashboard serves on its own listener, separate from the Transmission RPC port (`:9091`), so you can publish it without exposing the RPC endpoint your *arr apps use.
+
+> ⚠️ **No authentication (v1).** The dashboard inherits the same private-network trust model as the RPC port, and its settings API can change configuration and act on your put.io account. Serve it on a trusted network or behind a reverse proxy that adds authentication — do **not** expose it directly to the LAN or internet. The put.io token is never rendered in the UI or in any API response.
+
+**Docker** — publish only the dashboard; the RPC port stays internal to your *arr network:
+
+```bash
+docker run -d \
+  --name plundrio \
+  -p 9092:9092 \
+  -v /path/to/downloads:/downloads \
+  -e PLDR_TOKEN=your-token \
+  -e PLDR_TARGET=/downloads \
+  -e PLDR_FOLDER=plundrio \
+  -e PLDR_DASHBOARD=true \
+  ghcr.io/doodla/plundrio:latest
+```
+
+Inside a container, keep the default all-interfaces bind (`PLDR_DASHBOARD_ADDR=:9092`) rather than `127.0.0.1:9092`, or the published port will not reach the listener.
+
+**NixOS** — via the bundled module:
+
+```nix
+services.plundrio = {
+  enable = true;
+  dashboard = true;
+  dashboardAddr = ":9092"; # default; override to relocate
+  # ... targetDir, putioFolder, authTokenFile, etc.
+};
+```
 
 ## 🔌 Configuring *arr Applications
 

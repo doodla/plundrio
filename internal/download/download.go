@@ -22,6 +22,14 @@ func (m *Manager) downloadWorker() {
 			// Immediate shutdown requested
 			log.Info("download").Msg("Worker stopping due to shutdown request")
 			return
+		case <-m.workerQuit:
+			// Individual retire requested by SetWorkerCount (shrink). This
+			// worker has no in-flight job at this select, so it exits now; a
+			// worker that IS mid-download finishes that job, loops, and reads
+			// the token on the next iteration. workerWg.Done fires via the
+			// deferred call in the spawning goroutine.
+			log.Debug("download").Msg("Worker retiring due to pool resize")
+			return
 		case job, ok := <-m.jobs:
 			if !ok {
 				return

@@ -1,0 +1,250 @@
+/* ============================================================================
+   THEME SYSTEM — palette (tide | ember | ion) × mode (dark | light).
+   The token VALUES below are lifted verbatim from the approved mockup
+   (.agents/dashboard/mockups/relaydeck/index.html) — that file is the locked
+   color source of truth. All component CSS references tokens ONLY; a fourth
+   palette would be one more token block. Default = ion + dark.
+   The hero dial glow is removed (flat instrument bay); *-glow tokens are
+   reserved for active phase elements + the live indicator only.
+   ============================================================================ */
+
+/* ---- shared structural tokens ---- */
+:root {
+  --sans: 'Inter', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --r-s: 8px;
+  --r-m: 12px;
+  --r-l: 16px;
+}
+
+/* =======================  PALETTE: TIDE  ======================= */
+/* cool marine instrument — slate-teal graphite, azure put.io, aqua-teal local */
+:root[data-palette='tide'][data-theme='dark'] {
+  --bg: #06090c;
+  --bg-grad-a: rgba(78, 163, 245, 0.05);
+  --bg-grad-b: rgba(47, 217, 192, 0.045);
+  --surf-0: #0a0f15;
+  --surf-1: #0e151c;
+  --surf-2: #121b24;
+  --surf-3: #19242f;
+  --surf-4: #243646;
+  --hair: rgba(150, 195, 215, 0.08);
+  --hair-2: rgba(150, 195, 215, 0.14);
+  --ink: #e9f1f5;
+  --ink-2: #a6bccb;
+  --ink-3: #6b8294;
+  --ink-4: #455866;
+  --putio: #4ea3f5;
+  --putio-2: #1a5489;
+  --putio-glow: rgba(78, 163, 245, 0.42);
+  --local: #2fd9c0;
+  --local-2: #147c70;
+  --local-ink: #04201c;
+  --local-glow: rgba(47, 217, 192, 0.45);
+  --amber: #f4b740;
+  --amber-bg: rgba(244, 183, 64, 0.1);
+  --amber-br: rgba(244, 183, 64, 0.24);
+  --green: #46d18a;
+  --green-glow: rgba(70, 209, 138, 0.5);
+  --red: #ff6f6f;
+  --red-bg: rgba(255, 111, 111, 0.1);
+  --red-deep: #481f24;
+  --red-ink: #ff9d9d;
+  --track: #19242f;
+  --sh-card: 0 24px 60px -34px rgba(0, 0, 0, 0.85);
+  --sh-pop: 0 3px 12px rgba(0, 0, 0, 0.4);
+  --metal-a: #ffffff;
+  --metal-b: #bcccd6;
+}
+:root[data-palette='tide'][data-theme='light'] {
+  --bg: #e6edf1;
+  --bg-grad-a: rgba(31, 116, 196, 0.07);
+  --bg-grad-b: rgba(15, 143, 126, 0.06);
+  --surf-0: #edf2f5;
+  --surf-1: #ffffff;
+  --surf-2: #f3f7f9;
+  --surf-3: #e2ebef;
+  --surf-4: #d2e0e6;
+  --hair: rgba(20, 55, 75, 0.1);
+  --hair-2: rgba(20, 55, 75, 0.16);
+  --ink: #0f1820;
+  --ink-2: #39505e;
+  --ink-3: #5c7585;
+  --ink-4: #92a8b4;
+  --putio: #1f74c4;
+  --putio-2: #9ec9ef;
+  --putio-glow: rgba(31, 116, 196, 0.26);
+  --local: #0f8f7e;
+  --local-2: #74dccb;
+  --local-ink: #ffffff;
+  --local-glow: rgba(15, 143, 126, 0.28);
+  --amber: #946312;
+  --amber-bg: rgba(148, 99, 18, 0.1);
+  --amber-br: rgba(148, 99, 18, 0.26);
+  --green: #2f8f5e;
+  --green-glow: rgba(47, 143, 94, 0.3);
+  --red: #c0392f;
+  --red-bg: rgba(192, 57, 47, 0.08);
+  --red-deep: #f0d6d3;
+  --red-ink: #a02a22;
+  --track: #d6e0e5;
+  --sh-card: 0 18px 44px -30px rgba(15, 40, 60, 0.38);
+  --sh-pop: 0 3px 12px rgba(15, 40, 60, 0.15);
+  --metal-a: #11202c;
+  --metal-b: #3f5566;
+}
+
+/* =======================  PALETTE: EMBER  ======================= */
+/* refined warm graphite — warm charcoal, cool periwinkle put.io, warm coral local */
+:root[data-palette='ember'][data-theme='dark'] {
+  --bg: #0c0a08;
+  --bg-grad-a: rgba(138, 160, 216, 0.045);
+  --bg-grad-b: rgba(255, 138, 107, 0.05);
+  --surf-0: #120f0c;
+  --surf-1: #16130f;
+  --surf-2: #1c1813;
+  --surf-3: #241f18;
+  --surf-4: #352c22;
+  --hair: rgba(220, 200, 175, 0.08);
+  --hair-2: rgba(220, 200, 175, 0.14);
+  --ink: #f3ece2;
+  --ink-2: #c4b6a6;
+  --ink-3: #8c8073;
+  --ink-4: #5d5346;
+  --putio: #8aa0d8;
+  --putio-2: #3a4a78;
+  --putio-glow: rgba(138, 160, 216, 0.4);
+  --local: #ff8a6b;
+  --local-2: #a8482f;
+  --local-ink: #2a0f08;
+  --local-glow: rgba(255, 138, 107, 0.45);
+  --amber: #e8c14e;
+  --amber-bg: rgba(232, 193, 78, 0.1);
+  --amber-br: rgba(232, 193, 78, 0.24);
+  --green: #7bc98a;
+  --green-glow: rgba(123, 201, 138, 0.45);
+  --red: #f4716a;
+  --red-bg: rgba(244, 113, 106, 0.1);
+  --red-deep: #4a201c;
+  --red-ink: #ffa097;
+  --track: #241f18;
+  --sh-card: 0 24px 60px -34px rgba(0, 0, 0, 0.85);
+  --sh-pop: 0 3px 12px rgba(0, 0, 0, 0.42);
+  --metal-a: #fff8ef;
+  --metal-b: #d4c4b2;
+}
+:root[data-palette='ember'][data-theme='light'] {
+  --bg: #efe9e1;
+  --bg-grad-a: rgba(77, 95, 168, 0.06);
+  --bg-grad-b: rgba(198, 74, 46, 0.06);
+  --surf-0: #f4efe8;
+  --surf-1: #fffdf9;
+  --surf-2: #f7f2ea;
+  --surf-3: #ece4d8;
+  --surf-4: #ddd2c2;
+  --hair: rgba(70, 55, 40, 0.1);
+  --hair-2: rgba(70, 55, 40, 0.16);
+  --ink: #1c1611;
+  --ink-2: #4a4034;
+  --ink-3: #6f6557;
+  --ink-4: #a39786;
+  --putio: #4d5fa8;
+  --putio-2: #aab6e0;
+  --putio-glow: rgba(77, 95, 168, 0.26);
+  --local: #c64a2e;
+  --local-2: #f0a890;
+  --local-ink: #ffffff;
+  --local-glow: rgba(198, 74, 46, 0.28);
+  --amber: #8a6a14;
+  --amber-bg: rgba(138, 106, 20, 0.1);
+  --amber-br: rgba(138, 106, 20, 0.26);
+  --green: #3a8a52;
+  --green-glow: rgba(58, 138, 82, 0.3);
+  --red: #bf3b2c;
+  --red-bg: rgba(191, 59, 44, 0.08);
+  --red-deep: #f0d5d0;
+  --red-ink: #9e2e20;
+  --track: #e2d8ca;
+  --sh-card: 0 18px 44px -30px rgba(60, 40, 20, 0.34);
+  --sh-pop: 0 3px 12px rgba(60, 40, 20, 0.14);
+  --metal-a: #241a12;
+  --metal-b: #5a4a3a;
+}
+
+/* =======================  PALETTE: ION  (default)  ======================= */
+/* restrained near-mono graphite, muted steel put.io, electric indigo local accent */
+:root[data-palette='ion'][data-theme='dark'],
+:root:not([data-palette]) {
+  --bg: #08090b;
+  --bg-grad-a: rgba(139, 151, 173, 0.035);
+  --bg-grad-b: rgba(124, 108, 255, 0.06);
+  --surf-0: #0c0e11;
+  --surf-1: #111317;
+  --surf-2: #16191e;
+  --surf-3: #1d2128;
+  --surf-4: #2a3038;
+  --hair: rgba(190, 200, 220, 0.08);
+  --hair-2: rgba(190, 200, 220, 0.14);
+  --ink: #edeef2;
+  --ink-2: #aeb4c0;
+  --ink-3: #737a88;
+  --ink-4: #4b515c;
+  --putio: #8b97ad;
+  --putio-2: #454d5c;
+  --putio-glow: rgba(139, 151, 173, 0.34);
+  --local: #8b7cff;
+  --local-2: #4a3da8;
+  --local-ink: #0b0820;
+  --local-glow: rgba(124, 108, 255, 0.5);
+  --amber: #f0b53e;
+  --amber-bg: rgba(240, 181, 62, 0.1);
+  --amber-br: rgba(240, 181, 62, 0.24);
+  --green: #4cc98a;
+  --green-glow: rgba(76, 201, 138, 0.48);
+  --red: #ff6f7a;
+  --red-bg: rgba(255, 111, 122, 0.1);
+  --red-deep: #46202a;
+  --red-ink: #ff9aa2;
+  --track: #1d2128;
+  --sh-card: 0 24px 60px -34px rgba(0, 0, 0, 0.85);
+  --sh-pop: 0 3px 12px rgba(0, 0, 0, 0.42);
+  --metal-a: #ffffff;
+  --metal-b: #c2c6d2;
+}
+:root[data-palette='ion'][data-theme='light'] {
+  --bg: #e9eaee;
+  --bg-grad-a: rgba(90, 102, 120, 0.05);
+  --bg-grad-b: rgba(91, 78, 224, 0.06);
+  --surf-0: #eeeff2;
+  --surf-1: #ffffff;
+  --surf-2: #f4f5f7;
+  --surf-3: #e6e8ec;
+  --surf-4: #d6d9df;
+  --hair: rgba(40, 45, 60, 0.1);
+  --hair-2: rgba(40, 45, 60, 0.16);
+  --ink: #13151b;
+  --ink-2: #3e434f;
+  --ink-3: #5e6573;
+  --ink-4: #949aa6;
+  --putio: #5a6678;
+  --putio-2: #aeb6c4;
+  --putio-glow: rgba(90, 102, 120, 0.24);
+  --local: #5b4ee0;
+  --local-2: #a99fef;
+  --local-ink: #ffffff;
+  --local-glow: rgba(91, 78, 224, 0.28);
+  --amber: #8a6614;
+  --amber-bg: rgba(138, 102, 20, 0.1);
+  --amber-br: rgba(138, 102, 20, 0.26);
+  --green: #2f8f5e;
+  --green-glow: rgba(47, 143, 94, 0.3);
+  --red: #c0392f;
+  --red-bg: rgba(192, 57, 47, 0.08);
+  --red-deep: #f0d6d3;
+  --red-ink: #a02a22;
+  --track: #dde0e5;
+  --sh-card: 0 18px 44px -30px rgba(25, 30, 50, 0.36);
+  --sh-pop: 0 3px 12px rgba(25, 30, 50, 0.15);
+  --metal-a: #161922;
+  --metal-b: #454c5c;
+}

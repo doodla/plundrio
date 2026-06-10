@@ -37,8 +37,28 @@ type Config struct {
 	// ListenAddr is the address to listen for transmission-rpc requests.
 	ListenAddr string `mapstructure:"listen"`
 
+	// Dashboard enables the web dashboard HTTP listener. Default-off: the
+	// dashboard adds zero surface unless explicitly enabled. Env PLDR_DASHBOARD,
+	// flag --dashboard. A deploy-time toggle — not editable via the settings API.
+	Dashboard bool `mapstructure:"dashboard"`
+
+	// DashboardAddr is the address the dashboard listener binds when enabled
+	// (separate from ListenAddr / the RPC :9091). Default ":9092". Env
+	// PLDR_DASHBOARD_ADDR, flag --dashboard-addr. Restart-required; surfaced in
+	// the settings API like ListenAddr.
+	DashboardAddr string `mapstructure:"dashboard_addr"`
+
 	// WorkerCount is the number of concurrent download workers (default: 4).
 	WorkerCount int `mapstructure:"workers"`
+
+	// TransferCheckInterval is how often the download manager polls put.io for
+	// transfer state. Zero means "use the package default" (30s — production
+	// behavior, unchanged). It exists primarily so demo mode can poll fast
+	// (~1-2s) and the live dashboard actually shows transfers climbing through
+	// the put.io-fetch → local-download phases instead of jumping
+	// queued→completed between slow polls. download.New applies it only when
+	// >0, so a default-constructed Config keeps the 30s cadence.
+	TransferCheckInterval time.Duration `mapstructure:"transfer_check_interval"`
 
 	// DownloadStartWindow optionally restricts when new local downloads may start.
 	DownloadStartWindow DownloadStartWindowConfig `mapstructure:"download_start_window"`

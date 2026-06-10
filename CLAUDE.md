@@ -10,12 +10,17 @@ plundrio is a put.io download client that integrates with the *arr stack (Sonarr
 
 This project uses **Nix flakes** exclusively for building — there is no Makefile or goreleaser.
 
+The binary embeds the web dashboard. `nix build` runs two derivations: `plundrio-ui` (`buildNpmPackage`) builds `ui/` to a `dist/` tree, and `makePlundrio` copies that tree into `internal/web/dist` via `postPatch` so `//go:embed all:dist` bakes it into the binary. The frontend is arch-independent, so it is built once with native `pkgs` and the same `dist/` is shared by both the native and aarch64 Go derivations (the JS is never cross-built).
+
 ```bash
-# Build native binary
+# Build native binary (with the embedded dashboard)
 nix build .#plundrio
 
-# Build for aarch64
+# Build for aarch64 (reuses the one native frontend build)
 nix build .#plundrio-aarch64
+
+# Build just the dashboard dist/ tree
+nix build .#plundrio-ui
 
 # Build Docker images
 nix build .#plundrio-docker
@@ -24,7 +29,9 @@ nix build .#plundrio-docker-aarch64
 # Enter dev shell (Go, gopls, golangci-lint)
 nix develop
 
-# Run directly with Go (during development)
+# Run directly with Go (during development). A non-dotfile placeholder lives in
+# internal/web/dist so this compiles without building the UI; the real dashboard
+# is only embedded by `nix build`.
 go build ./cmd/plundrio && ./plundrio run --help
 ```
 
@@ -36,7 +43,10 @@ go build ./cmd/plundrio && ./plundrio run --help
 
 `release.yml` builds all four targets (native, aarch64, docker, docker-aarch64) at release publish.
 
-**Important**: When Go dependencies change (`go.mod`/`go.sum`), regenerate `gomod2nix.toml` — `nix develop -c gomod2nix generate` from the repo root, or `nix run github:nix-community/gomod2nix` if not in the dev shell. The flake reads `modules = ./gomod2nix.toml` (no `vendorHash` — `buildGoApplication` resolves modules from the lockfile).
+**Important — two lockfile hashes to keep in sync, one per ecosystem:**
+
+- **Go modules** (`go.mod`/`go.sum` change): regenerate `gomod2nix.toml` — `nix develop -c gomod2nix generate` from the repo root, or `nix run github:nix-community/gomod2nix` if not in the dev shell. The flake reads `modules = ./gomod2nix.toml` (no `vendorHash` — `buildGoApplication` resolves modules from the lockfile).
+- **npm deps** (`ui/package-lock.json` change): regenerate `npmDepsHash` in `flake.nix` (the `frontend` derivation) — `nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json` and paste the printed `sha256-…` into `npmDepsHash`. Alternatively set it to `pkgs.lib.fakeHash`, run `nix build .#plundrio`, and copy the `got:` value from the hash-mismatch error. Keep `ui/package-lock.json` complete: it must carry the `@esbuild/linux-*` and `@rollup/rollup-linux-*` optional-dep entries (it does) so the offline sandbox on the Linux CI builder gets the native binaries without a postinstall download.
 
 ## Fork-only
 
@@ -107,8 +117,8 @@ internal/
 3. **Monitoring**: `Manager.monitorTransfers()` polls put.io every 30s, `TransferProcessor.checkTransfers()` categorizes transfers by status
 4. **Download**: Ready transfers get files queued as `downloadJob`s, processed by worker pool via `grab` library
 5. **Coordination**: `TransferCoordinator` tracks lifecycle states (Initial -> Downloading -> Completed -> Processed), `TransferContext` holds per-transfer state
-6. **Cleanup**: On completion, cleanup hook deletes source file from put.io but keeps transfer record for *arr visibility
-7. **torrent-remove**: *arr app requests removal; plundrio deletes put.io file + transfer
+6. **Mark Processed**: On local completion the transfer is marked `Processed` and **kept** (reported as 100%/Seeding) so the *arr app can still observe it. The put.io source is **not** deleted here — the cleanup hook only clears retry state.
+7. **Purge**: `Manager.PurgeTransfer` (the only `DeleteFile` caller) deletes the put.io file + transfer record and drops it from tracking — fired by `torrent-remove` (the happy path) or, if the client never removes it, by the retention janitor after `post_complete_retention`.
 
 ### Progress Reporting
 
@@ -116,7 +126,7 @@ Progress is split 50/50: put.io download (0-50%) + local download (50-100%). Thi
 
 ### Transfer Lifecycle States
 
-`TransferLifecycleState` in `types.go`: Initial -> Downloading -> Completed -> Processed (or Failed/Cancelled). The "Processed" state means files are downloaded and put.io source cleaned up; the transfer record stays for *arr to query until `torrent-remove`.
+`TransferLifecycleState` in `types.go`: Initial -> Downloading -> Completed -> Processed (or Failed/Cancelled). The "Processed" state means the local download finished and the transfer is **retained** (reported as 100%/Seeding) for *arr to observe — the put.io source is **not** deleted at this point. `Manager.PurgeTransfer` (the only `DeleteFile` caller) removes the put.io file + record later, on `torrent-remove` or after `post_complete_retention`. So a still-visible "completed" transfer's put.io source has NOT been cleaned — purged transfers drop out of tracking entirely.
 
 ### Key Types
 

@@ -46,6 +46,19 @@ type Manager struct {
 	mu      sync.Mutex // protects job queueing
 	running bool       // tracks if manager is running
 
+	// workerQuit retires INDIVIDUAL workers (distinct from stopChan, which
+	// retires all of them on shutdown). Buffered so SetWorkerCount can push
+	// retire tokens without blocking under m.mu; a worker reads a token after
+	// finishing its in-flight job and exits. Never closed — closing it would
+	// race the workers' receive the same way closing jobs races QueueDownload.
+	workerQuit chan struct{}
+	// workerCount is the reported target worker count, guarded by m.mu.
+	// SetWorkerCount is its SINGLE writer; workers never touch it (they own
+	// only workerWg). This single-owner rule prevents the double-decrement that
+	// would otherwise drive a shrink past its target (8→2 landing at -4 if both
+	// the setter and each retiring worker decremented).
+	workerCount int
+
 	processor *TransferProcessor // Handles transfer processing
 }
 
@@ -91,6 +104,13 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 	// Get default download configuration
 	dlConfig := GetDefaultConfig()
 
+	// Override the poll cadence from config when set (>0). Zero keeps the
+	// package default (30s) so production behavior is unchanged; demo mode sets
+	// it low so the dashboard shows live two-phase progress.
+	if cfg.TransferCheckInterval > 0 {
+		dlConfig.TransferCheckInterval = cfg.TransferCheckInterval
+	}
+
 	// Override with user config if provided
 	workerCount := cfg.WorkerCount
 	if workerCount <= 0 {
@@ -98,12 +118,15 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 	}
 
 	m := &Manager{
-		cfg:         cfg,
-		client:      client,
-		dlConfig:    dlConfig,
-		categories:  newCategoryStore(cfg.TargetDir),
-		stopChan:    make(chan struct{}),
-		jobs:        make(chan downloadJob, workerCount*dlConfig.BufferMultiple),
+		cfg:        cfg,
+		client:     client,
+		dlConfig:   dlConfig,
+		categories: newCategoryStore(cfg.TargetDir),
+		stopChan:   make(chan struct{}),
+		jobs:       make(chan downloadJob, workerCount*dlConfig.BufferMultiple),
+		// workerQuit is buffered well beyond any realistic worker count so a
+		// shrink can push all its retire tokens without blocking under m.mu.
+		workerQuit:  make(chan struct{}, 256),
 		activeFiles: sync.Map{},
 	}
 
@@ -213,22 +236,26 @@ func (m *Manager) PurgeTransfer(transferID int64) error {
 
 // Start begins monitoring transfers and downloading completed ones
 func (m *Manager) Start() {
+	workerCount := m.cfg.WorkerCount
+	if workerCount <= 0 {
+		workerCount = m.dlConfig.DefaultWorkerCount
+	}
+
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()
 		return
 	}
 	m.running = true
+	// Record the initial target count so a later SetWorkerCount computes deltas
+	// against the right baseline. m.mu guards workerCount; SetWorkerCount is its
+	// only other writer and also takes m.mu, so the two never race.
+	m.workerCount = workerCount
 	m.mu.Unlock()
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
 	m.categories.Load()
-
-	workerCount := m.cfg.WorkerCount
-	if workerCount <= 0 {
-		workerCount = m.dlConfig.DefaultWorkerCount
-	}
 
 	// Start download workers with proper synchronization
 	for i := 0; i < workerCount; i++ {
@@ -275,6 +302,71 @@ func (m *Manager) Stop() {
 	m.workerWg.Wait()
 	// Wait for monitor to finish
 	m.monitorWg.Wait()
+}
+
+// SetWorkerCount resizes the worker pool to n (n >= 1). It is the single writer
+// of the reported target count (m.workerCount) and runs entirely under m.mu so
+// a resize racing Stop() is safe: whichever takes m.mu second observes a
+// consistent running/workerCount pair.
+//
+//   - no-op if not running (Stop already closed stopChan; the pool is draining,
+//     so adding/removing workers is meaningless) or if n == current.
+//   - grow: spawn (n - current) more downloadWorker goroutines under workerWg,
+//     exactly as Start does.
+//   - shrink: push (current - n) retire tokens onto the buffered workerQuit.
+//     Each token retires one worker AFTER it finishes its in-flight job, so the
+//     goroutine count converges asynchronously while the reported count updates
+//     now. Best-effort: if the buffer were somehow full the extra token is
+//     dropped (the buffer cap far exceeds any realistic worker count).
+//
+// Never closes jobs or stopChan, preserving issue #2's send-on-closed invariant.
+func (m *Manager) SetWorkerCount(n int) {
+	if n < 1 {
+		n = 1
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.running {
+		return
+	}
+
+	cur := m.workerCount
+	switch {
+	case n > cur:
+		for i := 0; i < n-cur; i++ {
+			m.workerWg.Add(1)
+			go func() {
+				defer m.workerWg.Done()
+				m.downloadWorker()
+			}()
+		}
+	case n < cur:
+		for i := 0; i < cur-n; i++ {
+			select {
+			case m.workerQuit <- struct{}{}:
+			default:
+				// Buffer full — unreachable for any realistic count (cap 256).
+				// Dropping is safe: the count is already set to n below, and a
+				// subsequent SetWorkerCount reconciles any residual drift.
+				log.Warn("download").
+					Int("target", n).
+					Int("current", cur).
+					Msg("workerQuit buffer full; shrink token dropped")
+			}
+		}
+	}
+	m.workerCount = n
+}
+
+// GetWorkerCount returns the current reported target worker count. This is the
+// target SetWorkerCount last set, not necessarily the live goroutine count
+// (shrink converges asynchronously as in-flight jobs finish).
+func (m *Manager) GetWorkerCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.workerCount
 }
 
 // QueueDownload adds a download job to the queue if not already downloading

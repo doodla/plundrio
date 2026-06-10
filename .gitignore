@@ -4,3 +4,5 @@ dl/
 result
 result-*
 .direnv
+.agents/
+.agents/dashboard/screenshots/ui-review-1/

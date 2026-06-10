@@ -30,6 +30,28 @@ jobs:
           # this deliberately and address whatever new defaults flag.
           version: v2.12.1
 
+  # Fast feedback on the dashboard before the slower `nix` job builds and embeds
+  # it. The `nix` job is the source of truth for the embedded build; this job
+  # just fails PRs early on a broken UI (lint/type/test/build) without paying for
+  # a full Nix evaluation.
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
   nix:
     runs-on: ubuntu-latest
     steps:
