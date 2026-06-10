@@ -13,15 +13,6 @@ type (
 	progressResult = transferprog.Result
 )
 
-// Transmission status constants, re-exported from the shared package so the
-// server's handlers and tests keep referring to them by their original names.
-const (
-	trStatusStopped         = transferprog.TrStatusStopped
-	trStatusDownloadWaiting = transferprog.TrStatusDownloadWaiting
-	trStatusDownload        = transferprog.TrStatusDownload
-	trStatusSeed            = transferprog.TrStatusSeed
-)
-
 // calculateProgress delegates to the shared two-phase implementation.
 func calculateProgress(in progressInput) progressResult {
 	return transferprog.CalculateProgress(in)

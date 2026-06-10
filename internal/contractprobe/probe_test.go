@@ -75,11 +75,11 @@ func correctServer() *httptest.Server {
 		fl, _ := w.(http.Flusher)
 		// snapshot first, then an incremental transfers event. A real SSE
 		// server emits compact (single-line) JSON in each data: field.
-		fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", compactJSON(correctSnapshotJSON))
+		_, _ = fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", compactJSON(correctSnapshotJSON))
 		if fl != nil {
 			fl.Flush()
 		}
-		fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
+		_, _ = fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
 		if fl != nil {
 			fl.Flush()
 		}
@@ -225,11 +225,11 @@ func TestProberDetectsWrongSSEFirstEvent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl, _ := w.(http.Flusher)
-		fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
+		_, _ = fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
 		if fl != nil {
 			fl.Flush()
 		}
-		fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
+		_, _ = fmt.Fprintf(w, "event: transfers\ndata: %s\n\n", compactJSON(correctTransfersJSON))
 		if fl != nil {
 			fl.Flush()
 		}
@@ -252,7 +252,7 @@ func TestProberDetectsMissingSSEIncremental(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl, _ := w.(http.Flusher)
-		fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", compactJSON(correctSnapshotJSON))
+		_, _ = fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", compactJSON(correctSnapshotJSON))
 		if fl != nil {
 			fl.Flush()
 		}

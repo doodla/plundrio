@@ -24,24 +24,11 @@ var OverrideKeys = []string{
 	"dashboard_addr",
 }
 
-// overrideKeySet is OverrideKeys as a lookup set: the keys ApplyOverrides layers
-// onto viper at boot. Token is deliberately NOT here — it is never applied from
-// the file (env/flag/config own it; the design's "env-pinned, never touched"
-// invariant), so a leaked or stale file token can't silently become the
-// resolved token.
-var overrideKeySet = func() map[string]bool {
-	m := make(map[string]bool, len(OverrideKeys))
-	for _, k := range OverrideKeys {
-		m[k] = true
-	}
-	return m
-}()
-
 // persistableKeySet is the set WriteOverride accepts: the boot-applied
 // OverrideKeys PLUS token. Token is persistable (the contract's PUT reports it
-// under "persisted") yet never boot-applied, so it lives in this wider set but
-// not in overrideKeySet. LoadOverrides drops token on load so it never reaches
-// ApplyOverrides.
+// under "persisted") yet never boot-applied — ApplyOverrides iterates
+// OverrideKeys (which omits token), so a stale or leaked file token can never
+// become the resolved token.
 var persistableKeySet = func() map[string]bool {
 	m := make(map[string]bool, len(OverrideKeys)+1)
 	for _, k := range OverrideKeys {

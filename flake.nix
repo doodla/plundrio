@@ -200,7 +200,7 @@
           #   nix run nixpkgs#prefetch-npm-deps -- ui/package-lock.json
           # (or set to lib.fakeHash, run `nix build .#plundrio`, and copy the
           # `got:` value from the hash-mismatch error). CI computes the real hash.
-          npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          npmDepsHash = "sha256-8pUGikNUd0biYA6+A4T5KBpSNAGZWkDC2Zxc4Ib7RVs=";
 
           # Pin the Node toolchain so a Vite engines field can't drift esbuild/
           # rollup binary resolution under us across nixpkgs bumps.
