@@ -1474,10 +1474,37 @@ footer {
 }
 @media (max-width: 560px) {
   main {
-    padding: 18px 14px 70px;
+    /* extra bottom padding clears the fixed nav tab bar + iOS home indicator */
+    padding: 18px 14px calc(72px + env(safe-area-inset-bottom));
   }
+  .rail {
+    padding: 0 14px;
+    gap: 10px;
+  }
+  /* Section nav becomes a fixed bottom tab bar (no room in the top rail). */
   .rail nav {
-    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    margin-left: 0;
+    gap: 0;
+    background: color-mix(in srgb, var(--surf-0) 92%, transparent);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--hair-2);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .rail nav button {
+    flex: 1;
+    height: 54px;
+    padding: 0;
+    border-radius: 0;
+    font-size: 11px;
+  }
+  .rail nav button.on {
+    background: var(--surf-2);
+    box-shadow: inset 0 2px 0 var(--local);
   }
   .clock {
     display: none;
@@ -1485,8 +1512,25 @@ footer {
   .palpick button span.txt {
     display: none;
   }
+  /* roomier tap targets for the theme/palette controls */
+  .toggle,
+  .toggle button,
+  .palpick,
+  .palpick button {
+    height: 38px;
+  }
+  .bay {
+    padding: 20px 16px 18px;
+  }
+  .flowgauge {
+    width: min(320px, 76vw);
+    height: auto;
+    aspect-ratio: 1;
+  }
   .cluster {
     grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 12px;
   }
   .ln {
     grid-template-columns: 5px 64px 110px 1fr;
@@ -1496,6 +1540,8 @@ footer {
   }
   .tr {
     grid-template-columns: 52px 1fr;
+    gap: 12px;
+    padding: 12px 14px;
   }
   .tr .trMeta {
     display: none;
