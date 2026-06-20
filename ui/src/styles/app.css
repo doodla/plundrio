@@ -1480,6 +1480,20 @@ footer {
   .rail {
     padding: 0 14px;
     gap: 10px;
+    /* MUST stay none on mobile: a backdrop-filter ancestor would become the
+       containing block for the fixed bottom nav below, pinning it to the rail
+       instead of the viewport. */
+    backdrop-filter: none;
+  }
+  /* Trim the top rail so brand + controls fit one line on a ~320px phone. */
+  .brand .v {
+    display: none;
+  }
+  /* Collapse the connection pill to its status dot (color still conveys state). */
+  .live {
+    gap: 0;
+    padding: 7px;
+    font-size: 0;
   }
   /* Section nav becomes a fixed bottom tab bar (no room in the top rail). */
   .rail nav {
@@ -1518,6 +1532,9 @@ footer {
   .palpick,
   .palpick button {
     height: 38px;
+  }
+  .palpick button {
+    padding: 0 8px;
   }
   .bay {
     padding: 20px 16px 18px;
