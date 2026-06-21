@@ -66,6 +66,10 @@ type Server struct {
 	accountMu       sync.Mutex
 	cachedAccount   *putio.AccountInfo
 	cachedAccountAt time.Time
+
+	// now is the clock used for cache freshness; time.Now in production,
+	// overridden in tests to drive TTL expiry deterministically.
+	now func() time.Time
 }
 
 // New creates a new RPC server
@@ -88,6 +92,7 @@ func New(cfg *config.Config, client PutioClient, dlService DownloadService) *Ser
 		dlService:    dlService,
 		quotaTicker:  time.NewTicker(15 * time.Minute),
 		minFreeSpace: minFree,
+		now:          time.Now,
 	}
 }
 
@@ -97,7 +102,7 @@ func (s *Server) cachedAccountInfo(ctx context.Context) (*putio.AccountInfo, err
 	s.accountMu.Lock()
 	defer s.accountMu.Unlock()
 
-	if s.cachedAccount != nil && time.Since(s.cachedAccountAt) < accountCacheTTL {
+	if s.cachedAccount != nil && s.now().Sub(s.cachedAccountAt) < accountCacheTTL {
 		return s.cachedAccount, nil
 	}
 	account, err := s.client.GetAccountInfo(ctx)
@@ -105,7 +110,7 @@ func (s *Server) cachedAccountInfo(ctx context.Context) (*putio.AccountInfo, err
 		return nil, err
 	}
 	s.cachedAccount = account
-	s.cachedAccountAt = time.Now()
+	s.cachedAccountAt = s.now()
 	return account, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/config"
@@ -154,5 +155,27 @@ func TestFreeSpaceCacheCollapsesBurst(t *testing.T) {
 	defer client.mu.Unlock()
 	if client.accountInfoCalls != 1 {
 		t.Errorf("expected 1 cached account.info call across a burst, got %d", client.accountInfoCalls)
+	}
+}
+
+func TestFreeSpaceCacheRefreshesAfterTTL(t *testing.T) {
+	client := &fakePutioClient{accountInfo: accountWithAvail(50_000_000_000)}
+	dl := newFakeDownloadService()
+	srv := newTestServerWithMinFree(t, client, dl, "10GB")
+
+	// Drive the cache clock so TTL expiry is deterministic.
+	clock := time.Now()
+	srv.now = func() time.Time { return clock }
+
+	addMagnet(t, srv)                   // cold cache -> fetch #1, stamped at clock
+	clock = clock.Add(30 * time.Second) // still within the 60s TTL
+	addMagnet(t, srv)                   // cached -> no fetch
+	clock = clock.Add(31 * time.Second) // now 61s since the fetch -> stale
+	addMagnet(t, srv)                   // refresh -> fetch #2
+
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.accountInfoCalls != 2 {
+		t.Errorf("expected 2 account.info calls (1 cold + 1 after TTL), got %d", client.accountInfoCalls)
 	}
 }

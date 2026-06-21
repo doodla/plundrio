@@ -168,6 +168,33 @@ type putioClient interface {
 	server.PutioClient
 }
 
+// validateRunConfig performs the pure (non-filesystem) validation of run-time
+// config and returns the first problem found. Extracted from runCmd's Run so it
+// is unit-testable without tripping log.Fatal / os.Exit; runCmd wraps the
+// returned error in a log.Fatal.
+func validateRunConfig(cfg *config.Config, demoMode bool) error {
+	if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
+		return fmt.Errorf("invalid download start window configuration: %w", err)
+	}
+
+	// Guard against an operator setting an aggressive prod poll that would
+	// hammer the put.io API and risk HTTP 429 rate limiting. Demo mode is
+	// exempt (it intentionally sets a 1s poll). 0 means "use the 30s package
+	// default", so only a positive sub-5s value is rejected.
+	if !demoMode && cfg.TransferCheckInterval > 0 && cfg.TransferCheckInterval < 5*time.Second {
+		return fmt.Errorf("transfer_check_interval %s below 5s is not allowed outside demo mode", cfg.TransferCheckInterval)
+	}
+
+	// Validate the free-space floor up front so a typo ("10 PB", "abc") fails
+	// fast at startup rather than silently disabling the check deep in
+	// server.New.
+	if _, err := config.ParseByteSize(cfg.MinFreeSpace); err != nil {
+		return fmt.Errorf("invalid min_free_space value: %w", err)
+	}
+
+	return nil
+}
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run the download manager",
@@ -241,25 +268,8 @@ var runCmd = &cobra.Command{
 			log.Fatal("config").Str("dir", cfg.TargetDir).Msg("Target path is not a directory")
 		}
 
-		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
-			log.Fatal("config").Err(err).Msg("Invalid download start window configuration")
-		}
-
-		// Guard against an operator setting an aggressive prod poll that would
-		// hammer the put.io API and risk HTTP 429 rate limiting. Demo mode is
-		// exempt (it intentionally sets a 1s poll below). 0 means "use the 30s
-		// package default", so only a positive sub-5s value is rejected.
-		if !demoMode && cfg.TransferCheckInterval > 0 && cfg.TransferCheckInterval < 5*time.Second {
-			log.Fatal("config").
-				Dur("interval", cfg.TransferCheckInterval).
-				Msg("transfer_check_interval below 5s is not allowed outside demo mode")
-		}
-
-		// Validate the free-space floor up front so a typo ("10 PB", "abc")
-		// fails fast at startup rather than silently disabling the check deep in
-		// server.New.
-		if _, err := config.ParseByteSize(cfg.MinFreeSpace); err != nil {
-			log.Fatal("config").Err(err).Msg("Invalid min_free_space value")
+		if err := validateRunConfig(cfg, demoMode); err != nil {
+			log.Fatal("config").Err(err).Msg("Invalid configuration")
 		}
 
 		// Initialize the put.io client. Demo mode swaps in the in-process fake
