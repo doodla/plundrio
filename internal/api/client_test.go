@@ -108,6 +108,95 @@ func TestGetAllTransferFilesSingleFile(t *testing.T) {
 	}
 }
 
+// TestEnsureFolderReturnsExisting: when a folder with the name already exists at
+// the put.io root, EnsureFolder returns its ID without creating a new one.
+func TestEnsureFolderReturnsExisting(t *testing.T) {
+	var createCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/files/list", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"files":[` + fileJSON(555, "plundrio", 0, true) + `],"cursor":""}`))
+	})
+	mux.HandleFunc("/v2/files/create-folder", func(w http.ResponseWriter, r *http.Request) {
+		createCalled = true
+		http.Error(w, "should not create", http.StatusBadRequest)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	id, err := c.EnsureFolder(context.Background(), "plundrio")
+	if err != nil {
+		t.Fatalf("EnsureFolder: %v", err)
+	}
+	if id != 555 {
+		t.Errorf("folder id = %d, want 555 (existing)", id)
+	}
+	if createCalled {
+		t.Error("create-folder called for an already-existing folder")
+	}
+}
+
+// TestEnsureFolderCreatesWhenMissing: with no matching folder at the root,
+// EnsureFolder creates one and returns the new ID.
+func TestEnsureFolderCreatesWhenMissing(t *testing.T) {
+	var createCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/files/list", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"files":[` + fileJSON(1, "other", 0, true) + `],"cursor":""}`))
+	})
+	mux.HandleFunc("/v2/files/create-folder", func(w http.ResponseWriter, r *http.Request) {
+		createCalled = true
+		_, _ = w.Write([]byte(`{"file":` + fileJSON(777, "plundrio", 0, true) + `}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	id, err := c.EnsureFolder(context.Background(), "plundrio")
+	if err != nil {
+		t.Fatalf("EnsureFolder: %v", err)
+	}
+	if id != 777 {
+		t.Errorf("folder id = %d, want 777 (created)", id)
+	}
+	if !createCalled {
+		t.Error("create-folder not called for a missing folder")
+	}
+}
+
+// TestAddTransferRejectsErrorStatus: a transfer that put.io immediately marks
+// ERROR (e.g. a bad magnet) must surface as an error from AddTransfer, not a
+// silent empty hash.
+func TestAddTransferRejectsErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"transfer":{"id":1,"status":"ERROR","error_message":"bad magnet"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	_, err := c.AddTransfer(context.Background(), "magnet:?xt=bad", 42)
+	if err == nil {
+		t.Fatal("expected error for ERROR-status transfer, got nil")
+	}
+}
+
+// TestAddTransferReturnsHash: a healthy add returns the transfer hash.
+func TestAddTransferReturnsHash(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"transfer":{"id":1,"status":"IN_QUEUE","hash":"deadbeef"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	hash, err := c.AddTransfer(context.Background(), "magnet:?xt=ok", 42)
+	if err != nil {
+		t.Fatalf("AddTransfer: %v", err)
+	}
+	if hash != "deadbeef" {
+		t.Errorf("hash = %q, want deadbeef", hash)
+	}
+}
+
 // TestGetAllTransferFilesPropagatesError ensures an API failure on the root Get
 // surfaces as an error rather than an empty list.
 func TestGetAllTransferFilesPropagatesError(t *testing.T) {
