@@ -40,6 +40,7 @@ var flagViperBindings = map[string]string{
 	"listen":                  "listen",
 	"workers":                 "workers",
 	"post-complete-retention": "post_complete_retention",
+	"transfer-check-interval": "transfer_check_interval",
 	"log-level":               "log_level",
 	"dashboard":               "dashboard",
 	"dashboard-addr":          "dashboard_addr",
@@ -236,6 +237,16 @@ var runCmd = &cobra.Command{
 
 		if err := download.ValidateStartWindow(cfg.DownloadStartWindow); err != nil {
 			log.Fatal("config").Err(err).Msg("Invalid download start window configuration")
+		}
+
+		// Guard against an operator setting an aggressive prod poll that would
+		// hammer the put.io API and risk HTTP 429 rate limiting. Demo mode is
+		// exempt (it intentionally sets a 1s poll below). 0 means "use the 30s
+		// package default", so only a positive sub-5s value is rejected.
+		if !demoMode && cfg.TransferCheckInterval > 0 && cfg.TransferCheckInterval < 5*time.Second {
+			log.Fatal("config").
+				Dur("interval", cfg.TransferCheckInterval).
+				Msg("transfer_check_interval below 5s is not allowed outside demo mode")
 		}
 
 		// Initialize the put.io client. Demo mode swaps in the in-process fake
@@ -484,6 +495,7 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("listen", "l", ":9091", "Listen address")
 	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
+	cmd.Flags().Duration("transfer-check-interval", 0, "How often to poll put.io for transfer state. 0 = default (30s). Values below 5s are rejected outside demo mode to avoid hammering the put.io API (risks HTTP 429 rate limiting).")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
 	cmd.Flags().Bool("dashboard", false, "Enable the web dashboard (default off). Also via PLDR_DASHBOARD=true.")
 	cmd.Flags().String("dashboard-addr", ":9092", "Address the web dashboard binds when enabled. Also via PLDR_DASHBOARD_ADDR.")
