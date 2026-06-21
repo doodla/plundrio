@@ -13,6 +13,7 @@ import (
 	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/download"
 	"github.com/doodla/plundrio/internal/log"
+	"github.com/doodla/plundrio/internal/transferprog"
 )
 
 // extractCategory returns the relative category path from downloadDir.
@@ -223,10 +224,10 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		rateDownload := t.DownloadSpeed
 
 		// Pick the error to report. plundrio's permanently-failed cascade wins
-		// over put.io's ErrorMessage: if both are set, plundrio's reflects the
+		// over put.io's error fields: if both are set, plundrio's reflects the
 		// terminal decision (we already gave up retrying), and that's the one
 		// *arr should act on.
-		errString := t.ErrorMessage
+		errString := transferprog.PutioErrorString(t)
 		if prog.Error != "" {
 			errString = prog.Error
 		}

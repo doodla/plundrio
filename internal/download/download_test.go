@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"syscall"
 	"testing"
+
+	grab "github.com/cavaliergopher/grab/v3"
 )
 
 func TestIsTransientError(t *testing.T) {
@@ -31,15 +34,33 @@ func TestIsTransientError(t *testing.T) {
 		{name: "nil_error", err: nil, want: false},
 		{name: "download_cancelled_error", err: NewDownloadCancelledError("test.mkv", "shutdown"), want: false},
 
-		// Bare-string errors continue to be classified correctly.
+		// Bare-string network errors continue to be classified correctly.
 		{name: "connection_reset", err: errors.New("connection reset"), want: true},
 		{name: "connection_refused", err: errors.New("connection refused"), want: true},
 		{name: "io_timeout", err: errors.New("i/o timeout"), want: true},
-		{name: "http_429_too_many_requests", err: errors.New("HTTP 429 Too Many Requests"), want: true},
-		{name: "server_returned_503", err: errors.New("server returned 503"), want: true},
-		{name: "bad_gateway_502", err: errors.New("bad gateway 502"), want: true},
-		{name: "gateway_timeout_504", err: errors.New("gateway timeout 504"), want: true},
 		{name: "random_non_transient_error", err: errors.New("some random error"), want: false},
+
+		// Retryable HTTP status codes are matched on grab's typed
+		// StatusCodeError (the real CDN download error shape), not by
+		// substring-scanning the message.
+		{name: "grab_429", err: grab.StatusCodeError(http.StatusTooManyRequests), want: true},
+		{name: "grab_502", err: grab.StatusCodeError(http.StatusBadGateway), want: true},
+		{name: "grab_503", err: grab.StatusCodeError(http.StatusServiceUnavailable), want: true},
+		{name: "grab_504", err: grab.StatusCodeError(http.StatusGatewayTimeout), want: true},
+		{name: "grab_404_not_retryable", err: grab.StatusCodeError(http.StatusNotFound), want: false},
+		{
+			name: "grab_503_wrapped",
+			err:  fmt.Errorf("download failed: %w", grab.StatusCodeError(http.StatusServiceUnavailable)),
+			want: true,
+		},
+		// put.io API 5xx from GetDownloadURL reaches the same retry path.
+		{name: "putio_503", err: putioErrorWith("get download url", http.StatusServiceUnavailable), want: true},
+		{name: "putio_500_not_retryable", err: putioErrorWith("get download url", http.StatusInternalServerError), want: false},
+
+		// A bare-string error that merely contains "429"/"502" is NO longer
+		// treated as transient — only the typed status errors above are. This
+		// guards against false positives from URLs or byte counts.
+		{name: "bare_string_with_429_not_transient", err: errors.New("downloaded 4294967296 bytes"), want: false},
 
 		// Wrapped messages — the original classifier failed these.
 		{
