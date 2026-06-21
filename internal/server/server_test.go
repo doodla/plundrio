@@ -1,0 +1,56 @@
+package server
+
+import (
+	"net"
+	"testing"
+	"time"
+)
+
+// TestServerStartReturnsNilOnCleanStop guards the regression where Start
+// returned http.ErrServerClosed on a normal Stop. main.go log.Fatals on any
+// non-nil Start error, so leaking ErrServerClosed turned every clean SIGTERM
+// shutdown into a fatal exit(1). A clean Stop must make Start return nil.
+func TestServerStartReturnsNilOnCleanStop(t *testing.T) {
+	// Reserve a free localhost port, then hand it to the server.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	srv := newTestServer(t, &fakePutioClient{}, newFakeDownloadService())
+	srv.cfg.ListenAddr = addr
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Start() }()
+
+	// Wait until the listener is actually accepting before stopping, so we
+	// exercise the ListenAndServe → ErrServerClosed path rather than a pre-bind
+	// race.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c, derr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if derr == nil {
+			_ = c.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not start listening on %s", addr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := srv.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("Start returned %v, want nil after a clean Stop", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after Stop")
+	}
+}

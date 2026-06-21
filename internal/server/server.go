@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -48,10 +49,14 @@ type DownloadService interface {
 
 // Server handles transmission-rpc requests
 type Server struct {
-	cfg          *config.Config
-	client       PutioClient
-	srv          *http.Server
-	quotaTicker  *time.Ticker
+	cfg    *config.Config
+	client PutioClient
+
+	// srvMu guards srv, which Start() writes (from its own goroutine in main.go)
+	// and Stop() reads concurrently.
+	srvMu       sync.Mutex
+	srv         *http.Server
+	quotaTicker *time.Ticker
 	stopChan     chan struct{}
 	dlService    DownloadService
 	quotaWarning atomic.Bool // tracks if we've already warned about quota
@@ -144,10 +149,13 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transmission/rpc", s.handleRPC)
 
+	s.srvMu.Lock()
 	s.srv = &http.Server{
 		Addr:    s.cfg.ListenAddr,
 		Handler: mux,
 	}
+	srv := s.srv
+	s.srvMu.Unlock()
 
 	// Get and log account info. Goes through the cache so the immediately
 	// following checkDiskQuota (and the first torrent-add) reuse this fetch
@@ -186,10 +194,19 @@ func (s *Server) Start() error {
 	}()
 
 	log.Info("server").Str("addr", s.cfg.ListenAddr).Msg("Starting transmission-rpc server")
-	return s.srv.ListenAndServe()
+	// A clean Stop() (Shutdown/Close) makes ListenAndServe return
+	// http.ErrServerClosed. Normalize it to nil so the caller in main.go — which
+	// log.Fatals on any non-nil error — doesn't kill the process (exit 1, scary
+	// "Server error" log) on every normal SIGTERM shutdown. Mirrors the
+	// dashboard's Start(). Only a real bind/serve failure surfaces as an error.
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
-// Stop gracefully shuts down the server
+// Stop gracefully shuts down the server, draining in-flight RPC requests before
+// closing. Falls back to a hard Close if the drain doesn't finish in time.
 func (s *Server) Stop() error {
 	s.quotaTicker.Stop()
 	close(s.stopChan)
@@ -197,8 +214,18 @@ func (s *Server) Stop() error {
 	// Stop the download service
 	s.dlService.Stop()
 
-	if s.srv != nil {
-		return s.srv.Close()
+	s.srvMu.Lock()
+	srv := s.srv
+	s.srvMu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		// Drain timed out (or failed) — force the connections closed so shutdown
+		// doesn't hang. ListenAndServe still returns ErrServerClosed either way.
+		return srv.Close()
 	}
 	return nil
 }
