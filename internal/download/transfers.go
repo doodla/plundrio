@@ -24,7 +24,7 @@ import (
 type TransferProcessor struct {
 	manager            *Manager
 	transfers          atomic.Pointer[map[string][]*putio.Transfer] // Status -> Transfers (immutable once published)
-	processedTransfers sync.Map // map[int64]bool - Tracks transfers that have been processed locally
+	processedTransfers sync.Map                                     // map[int64]bool - Tracks transfers that have been processed locally
 
 	// retryAttempts and failedRetryStates back two distinct retry paths.
 	// retryAttempts: retry-count for transfers in put.io status "ERROR"
@@ -39,8 +39,23 @@ type TransferProcessor struct {
 	// The two paths operate on disjoint conditions and don't share state.
 	retryAttempts     sync.Map // map[int64]int — see comment above
 	failedRetryStates sync.Map // map[int64]*localRetryState — see comment above
-	folderID           int64
-	targetDir          string
+
+	// stallStates backs a third, disjoint path: transfers wedged in a
+	// non-terminal put.io status (IN_QUEUE/WAITING/PREPARING/DOWNLOADING)
+	// making no progress. Unlike the other two, these transfers have NO
+	// coordinator TransferContext yet (one is created only once a transfer
+	// reaches COMPLETED/SEEDING), so their stall timer can't live there — it
+	// lives here, keyed by put.io transfer ID. Driven by processStalledTransfers;
+	// disjoint from retryAttempts (ERROR status) and failedRetryStates (local
+	// download failures). See processStalledTransfersAt.
+	stallStates sync.Map // map[int64]*putioStallState
+	folderID    int64
+	targetDir   string
+
+	// stallTimeout / stallMaxRetries are cached from dlConfig at construction
+	// (single-writer monitor goroutine reads them). Tests override them directly.
+	stallTimeout    time.Duration
+	stallMaxRetries int
 
 	// lastSummaryCounts caches the last status-count map logged by
 	// logTransferSummary so subsequent ticks with identical counts can
@@ -110,6 +125,8 @@ func newTransferProcessor(m *Manager) *TransferProcessor {
 		retryAttempts:      sync.Map{},
 		folderID:           m.cfg.FolderID,
 		targetDir:          m.cfg.TargetDir,
+		stallTimeout:       m.dlConfig.StallTimeout,
+		stallMaxRetries:    m.dlConfig.StallMaxRetries,
 	}
 	empty := map[string][]*putio.Transfer{}
 	p.transfers.Store(&empty)
@@ -217,6 +234,9 @@ func (p *TransferProcessor) checkTransfers() {
 
 	// Process transfers by status
 	p.processReadyTransfers()
+	// Stall scan runs after processReadyTransfers so a transfer that just became
+	// ready this tick is initiated for download rather than mistaken for stalled.
+	p.processStalledTransfers()
 	p.processFailedTransfers()
 	p.processErroredTransfers()
 
@@ -714,6 +734,163 @@ func (p *TransferProcessor) processErroredTransfers() {
 			}
 		}
 	}
+}
+
+// nonTerminalPutioStatuses are the put.io statuses a transfer passes through
+// before it is ready (COMPLETED/SEEDING) or has failed (ERROR). COMPLETING is
+// deliberately excluded: it is short-lived, post-download, and exposes no
+// per-byte progress signal, so a slow finalize on a large transfer must not be
+// mistaken for a stall.
+var nonTerminalPutioStatuses = map[string]bool{
+	"IN_QUEUE":    true,
+	"WAITING":     true,
+	"PREPARING":   true,
+	"DOWNLOADING": true,
+}
+
+// putioStallState tracks, per put.io transfer ID, how long a transfer has sat
+// in a non-terminal status without progress. Mutated in place on the monitor
+// goroutine only (like localRetryState), so no internal locking is needed.
+type putioStallState struct {
+	Status         string    // last observed put.io status
+	StatusSince    time.Time // when the current no-progress window started
+	LastDownloaded int64     // last observed Transfer.Downloaded
+	LastPercent    int       // last observed Transfer.PercentDone
+	RetryCount     int       // stall-driven RetryTransfer calls made so far
+	RetriedAt      time.Time // when the most recent stall retry fired
+}
+
+// processStalledTransfers retries or deletes transfers wedged in a non-terminal
+// put.io status with no progress. See processStalledTransfersAt.
+func (p *TransferProcessor) processStalledTransfers() {
+	p.processStalledTransfersAt(time.Now())
+}
+
+// processStalledTransfersAt is the testable seam for processStalledTransfers
+// (clock injected), mirroring processFailedTransfersAt. A transfer is stalled
+// when it has been in the same non-terminal status with no byte/percent
+// progress for longer than stallTimeout. On a stall it is retried up to
+// stallMaxRetries times (each retry grants a fresh full window), then deleted —
+// the same give-up shape processErroredTransfers uses, surfacing to *arr via
+// the transfer disappearing from torrent-get.
+//
+// This path is disjoint from the other two: it only acts on
+// nonTerminalPutioStatuses, while processErroredTransfers handles ERROR and
+// processFailedTransfers handles transfers already in TransferLifecycleFailed
+// (which by definition reached COMPLETED/SEEDING first).
+func (p *TransferProcessor) processStalledTransfersAt(now time.Time) {
+	transfers := p.loadTransfers()
+
+	// Track every non-terminal transfer ID seen this tick so stallStates can be
+	// pruned of entries that completed, errored, or were purged — preventing the
+	// map from leaking across the process lifetime.
+	seen := make(map[int64]struct{})
+
+	for status := range nonTerminalPutioStatuses {
+		for _, t := range transfers[status] {
+			if t.SaveParentID != p.folderID {
+				continue
+			}
+			seen[t.ID] = struct{}{}
+			p.evaluateStall(t, now)
+		}
+	}
+
+	p.stallStates.Range(func(key, _ any) bool {
+		if _, ok := seen[key.(int64)]; !ok {
+			p.stallStates.Delete(key)
+		}
+		return true
+	})
+}
+
+// evaluateStall advances a single non-terminal transfer's stall state and acts
+// when it trips the timeout. Called only from processStalledTransfersAt on the
+// monitor goroutine, so in-place mutation of *putioStallState is safe.
+func (p *TransferProcessor) evaluateStall(t *putio.Transfer, now time.Time) {
+	stateValue, loaded := p.stallStates.LoadOrStore(t.ID, &putioStallState{
+		Status:         t.Status,
+		StatusSince:    now,
+		LastDownloaded: t.Downloaded,
+		LastPercent:    t.PercentDone,
+	})
+	if !loaded {
+		// First observation — start its window, nothing to decide yet.
+		return
+	}
+	st := stateValue.(*putioStallState)
+
+	// Only data movement counts as progress. put.io status churn among the
+	// non-terminal states is NOT progress: a seederless magnet bounces
+	// IN_QUEUE<->DOWNLOADING on successive polls, and refreshing the window on
+	// a status change would reset the clock every tick so the timeout never
+	// trips — the transfer would never be recovered, the exact bug this guards
+	// against. Byte movement in either direction counts (a retry can reset
+	// put.io's counter), so an actively (re)downloading transfer is never
+	// killed.
+	dataActivity := t.Downloaded != st.LastDownloaded || t.PercentDone != st.LastPercent
+	st.Status = t.Status
+	st.LastDownloaded = t.Downloaded
+	st.LastPercent = t.PercentDone
+	if dataActivity {
+		// Alive — refresh the window. RetryCount is deliberately NOT reset
+		// here: it is bounded across the transfer's entire non-terminal
+		// lifetime so our own retries (which reset put.io's byte counter) can't
+		// grant unlimited fresh budget. A transfer that truly recovers reaches
+		// COMPLETED/SEEDING, leaves the non-terminal set, and is pruned —
+		// resetting the budget naturally.
+		st.StatusSince = now
+		return
+	}
+
+	if now.Sub(st.StatusSince) < p.stallTimeout {
+		return
+	}
+
+	if st.RetryCount < p.stallMaxRetries {
+		st.RetryCount++
+		st.RetriedAt = now
+		st.StatusSince = now // grant the retried transfer a fresh full window
+		log.Warn("transfers").
+			Int64("id", t.ID).
+			Str("name", t.Name).
+			Str("status", t.Status).
+			Dur("stalled_for", p.stallTimeout).
+			Int64("downloaded", t.Downloaded).
+			Int("percent_done", t.PercentDone).
+			Str("status_message", t.StatusMessage).
+			Int("retry", st.RetryCount).
+			Int("max_retries", p.stallMaxRetries).
+			Msg("Transfer stalled on put.io with no progress, retrying")
+		if _, err := p.manager.client.RetryTransfer(p.manager.Context(), t.ID); err != nil {
+			// Tolerate the error — re-evaluate next window rather than escalate.
+			log.Error("transfers").
+				Int64("id", t.ID).
+				Str("name", t.Name).
+				Err(err).
+				Msg("Failed to retry stalled transfer")
+		}
+		return
+	}
+
+	// Retries exhausted — give up and delete so the put.io transfer slot frees
+	// and the transfer vanishes from torrent-get (which *arr treats as removal,
+	// then re-grabs a different release).
+	log.Error("transfers").
+		Int64("id", t.ID).
+		Str("name", t.Name).
+		Str("status", t.Status).
+		Int("retries", st.RetryCount).
+		Msg("Transfer stalled on put.io past retry budget, deleting")
+	if err := p.manager.client.DeleteTransfer(p.manager.Context(), t.ID); err != nil {
+		log.Error("transfers").
+			Int64("id", t.ID).
+			Str("name", t.Name).
+			Err(err).
+			Msg("Failed to delete stalled transfer")
+		return
+	}
+	p.stallStates.Delete(t.ID)
 }
 
 // MarkTransferProcessed marks a transfer as processed locally

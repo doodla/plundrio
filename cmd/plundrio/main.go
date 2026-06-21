@@ -41,6 +41,8 @@ var flagViperBindings = map[string]string{
 	"workers":                 "workers",
 	"post-complete-retention": "post_complete_retention",
 	"transfer-check-interval": "transfer_check_interval",
+	"stall-timeout":           "stall_timeout",
+	"stall-max-retries":       "stall_max_retries",
 	"log-level":               "log_level",
 	"dashboard":               "dashboard",
 	"dashboard-addr":          "dashboard_addr",
@@ -204,6 +206,8 @@ var runCmd = &cobra.Command{
 			Str("listen_addr", cfg.ListenAddr).
 			Int("workers", cfg.WorkerCount).
 			Dur("post_complete_retention", cfg.PostCompleteRetention).
+			Dur("stall_timeout", cfg.StallTimeout).
+			Int("stall_max_retries", cfg.StallMaxRetries).
 			Bool("download_start_window_enabled", cfg.DownloadStartWindow.Enabled).
 			Str("download_start_window_start", cfg.DownloadStartWindow.Start).
 			Str("download_start_window_end", cfg.DownloadStartWindow.End).
@@ -380,6 +384,9 @@ workers: 4									# Number of download workers
 post_complete_retention: 24h # Grace before DeleteTransfer on put.io after local
                              # download completes (window for *arr's torrent-remove);
                              # 0 disables — rely on the client to remove.
+stall_timeout: 1h            # No-progress window before a put.io transfer is
+                             # treated as stalled (then retried, then deleted).
+stall_max_retries: 1         # Stall retries before deleting (0 = delete on first stall).
 download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
@@ -388,7 +395,7 @@ log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
-# PLDR_POST_COMPLETE_RETENTION,
+# PLDR_POST_COMPLETE_RETENTION, PLDR_STALL_TIMEOUT, PLDR_STALL_MAX_RETRIES,
 # PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
 # PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
 `
@@ -496,6 +503,8 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().IntP("workers", "w", 4, "Number of workers")
 	cmd.Flags().Duration("post-complete-retention", 24*time.Hour, "Grace period after local download completes before unilaterally calling DeleteTransfer on put.io. The transfer stays visible to the *arr client as Seeding/100% during this window so it has time to issue torrent-remove. Set to 0 to disable (rely on torrent-remove only — risk: put.io quota leak if RemoveCompletedDownloads=false on the client side).")
 	cmd.Flags().Duration("transfer-check-interval", 0, "How often to poll put.io for transfer state. 0 = default (30s). Values below 5s are rejected outside demo mode to avoid hammering the put.io API (risks HTTP 429 rate limiting).")
+	cmd.Flags().Duration("stall-timeout", time.Hour, "How long a put.io transfer may sit in a non-terminal status (queued/preparing/downloading) with no progress before it is treated as stalled and retried, then deleted. A no-seeder torrent never reaches ERROR on put.io, so without this *arr waits forever. Keep generous — put.io legitimately queues for minutes.")
+	cmd.Flags().Int("stall-max-retries", 1, "How many times a stalled put.io transfer is retried (RetryTransfer) before being deleted. 0 = delete on first stall.")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
 	cmd.Flags().Bool("dashboard", false, "Enable the web dashboard (default off). Also via PLDR_DASHBOARD=true.")
 	cmd.Flags().String("dashboard-addr", ":9092", "Address the web dashboard binds when enabled. Also via PLDR_DASHBOARD_ADDR.")

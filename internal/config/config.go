@@ -78,4 +78,23 @@ type Config struct {
 	// directly must set this field explicitly or the janitor silently
 	// won't run.
 	PostCompleteRetention time.Duration `mapstructure:"post_complete_retention"`
+
+	// StallTimeout is how long a put.io transfer may sit in a non-terminal
+	// status (IN_QUEUE/WAITING/PREPARING/DOWNLOADING) without making progress
+	// before plundrio treats it as stalled — a torrent with no seeders never
+	// reaches ERROR on put.io, so without this guard *arr waits forever.
+	// On a stall the transfer is retried up to StallMaxRetries times, then
+	// deleted so *arr can grab a different release.
+	//
+	// Default-construction footgun (same as PostCompleteRetention): the Go zero
+	// value (0) means "use the package default" (1h), NOT "stall instantly".
+	// download.New applies it only when >0; the CLI flag injects the real 1h
+	// default. Keep the threshold generous — put.io legitimately queues for
+	// minutes on a cold magnet.
+	StallTimeout time.Duration `mapstructure:"stall_timeout"`
+
+	// StallMaxRetries is how many times a stalled transfer is retried before
+	// being deleted. 0 = delete on first stall (no retry). Only applied
+	// alongside StallTimeout (see download.New); the CLI flag default is 1.
+	StallMaxRetries int `mapstructure:"stall_max_retries"`
 }
