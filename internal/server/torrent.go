@@ -51,18 +51,22 @@ func extractCategory(targetDir, downloadDir string) string {
 	return rel
 }
 
-// findTransferByHash finds a transfer by its hash string
-func (s *Server) findTransferByHash(ctx context.Context, hash string) (*putio.Transfer, error) {
+// transfersByHash fetches the transfer list once and indexes it by hash.
+// handleTorrentRemove uses this instead of a per-id lookup: the Transmission
+// RPC ids field is an array (*arr can batch removals), and a lookup that
+// fetched the full list per hash was an N+1 against the put.io API. On a
+// hash collision the last transfer wins — put.io hashes are unique in
+// practice, so this is only a theoretical tie-break.
+func (s *Server) transfersByHash(ctx context.Context) (map[string]*putio.Transfer, error) {
 	transfers, err := s.client.GetTransfers(ctx)
 	if err != nil {
 		return nil, err
 	}
+	byHash := make(map[string]*putio.Transfer, len(transfers))
 	for _, t := range transfers {
-		if t.Hash == hash {
-			return t, nil
-		}
+		byHash[t.Hash] = t
 	}
-	return nil, fmt.Errorf("transfer not found with hash: %s", hash)
+	return byHash, nil
 }
 
 // handleTorrentAdd processes torrent-add requests
@@ -304,14 +308,25 @@ func (s *Server) handleTorrentRemove(ctx context.Context, args json.RawMessage) 
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 
+	// Resolve every requested hash from a single transfer-list fetch. If the
+	// fetch itself fails we surface the error rather than reporting success
+	// with nothing removed — *arr can then retry the removal.
+	byHash, err := s.transfersByHash(ctx)
+	if err != nil {
+		log.Error("rpc").
+			Str("operation", "torrent-remove").
+			Err(err).
+			Msg("Failed to list transfers")
+		return nil, fmt.Errorf("failed to list transfers: %w", err)
+	}
+
 	for _, hash := range params.IDs {
-		transfer, err := s.findTransferByHash(ctx, hash)
-		if err != nil {
+		transfer, ok := byHash[hash]
+		if !ok {
 			log.Error("rpc").
 				Str("operation", "torrent-remove").
 				Str("hash", hash).
-				Err(err).
-				Msg("Failed to find transfer")
+				Msg("Failed to find transfer with hash")
 			continue
 		}
 
