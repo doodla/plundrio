@@ -228,6 +228,31 @@ func TestWriteOverrideRoundTrips(t *testing.T) {
 	}
 }
 
+// TestWriteOverrideLeavesNoTempFiles asserts the atomic write cleans up its
+// unique temp file, leaving only the overrides file in the directory.
+func TestWriteOverrideLeavesNoTempFiles(t *testing.T) {
+	clearPLDREnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overrides.json")
+
+	if err := WriteOverride(path, map[string]any{"workers": 8}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := WriteOverride(path, map[string]any{"log_level": "debug"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "overrides.json" {
+			t.Errorf("unexpected leftover file: %q", e.Name())
+		}
+	}
+}
+
 // TestWriteOverrideRejectsUnknownKey guards against a typo silently persisting a
 // dead key.
 func TestWriteOverrideRejectsUnknownKey(t *testing.T) {
