@@ -4,7 +4,62 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/doodla/go-putio"
 )
+
+func TestPutioErrorString(t *testing.T) {
+	tests := []struct {
+		name     string
+		transfer putio.Transfer
+		want     string
+	}{
+		{
+			name:     "non-error status ignores tracker and status messages",
+			transfer: putio.Transfer{Status: "DOWNLOADING", TrackerMessage: "1 seeders 2 leechers", StatusMessage: "getting metadata"},
+			want:     "",
+		},
+		{
+			name:     "non-error status still surfaces ErrorMessage if set",
+			transfer: putio.Transfer{Status: "DOWNLOADING", ErrorMessage: "leftover error"},
+			want:     "leftover error",
+		},
+		{
+			name:     "error with tracker message only",
+			transfer: putio.Transfer{Status: "ERROR", TrackerMessage: "torrent not found"},
+			want:     "torrent not found",
+		},
+		{
+			name:     "error precedence tracker then error then status",
+			transfer: putio.Transfer{Status: "ERROR", TrackerMessage: "DMCA notice", ErrorMessage: "download failed", StatusMessage: "no peers"},
+			want:     "DMCA notice; download failed; no peers",
+		},
+		{
+			name:     "error de-dups repeated message across fields",
+			transfer: putio.Transfer{Status: "ERROR", ErrorMessage: "dead torrent", StatusMessage: "dead torrent"},
+			want:     "dead torrent",
+		},
+		{
+			name:     "error trims whitespace and skips blank fields",
+			transfer: putio.Transfer{Status: "ERROR", TrackerMessage: "  ", ErrorMessage: " banned ", StatusMessage: ""},
+			want:     "banned",
+		},
+		{
+			name:     "error with no messages yields empty",
+			transfer: putio.Transfer{Status: "ERROR"},
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := putioErrorString(&tt.transfer)
+			if got != tt.want {
+				t.Errorf("putioErrorString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestDeleteLocalData(t *testing.T) {
 	tests := []struct {

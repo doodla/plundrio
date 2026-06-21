@@ -155,6 +155,43 @@ func (s *Server) handleTorrentAdd(ctx context.Context, args json.RawMessage) (in
 	}, nil
 }
 
+// putioErrorString synthesizes a human-readable failure reason for *arr from a
+// put.io transfer's error fields, so a DMCA takedown / dead torrent / tracker
+// ban surfaces as Transmission's errorString instead of a silent "stopped"
+// (see #22). Without this, Sonarr/Radarr only notice via missing episodes.
+//
+// Field handling differs by how trustworthy each field is as an error signal:
+//
+//   - ErrorMessage is only populated when put.io errors a transfer, so it is
+//     always safe to surface.
+//   - TrackerMessage and StatusMessage are freeform and carry benign text in
+//     healthy states (tracker announce stats, "getting metadata", ...), so they
+//     are only consulted once put.io has actually marked the transfer ERROR —
+//     otherwise we'd flip error=true on a working transfer.
+//
+// When status is ERROR the distinct messages are joined in precedence order
+// (tracker > error > status): the tracker message (e.g. a DMCA notice or
+// "torrent not found") is the most actionable, then put.io's own ErrorMessage,
+// then its freeform StatusMessage. De-duping avoids repeating a reason put.io
+// copies across fields.
+func putioErrorString(t *putio.Transfer) string {
+	if t.Status != "ERROR" {
+		return t.ErrorMessage
+	}
+
+	seen := make(map[string]bool, 3)
+	var parts []string
+	for _, m := range []string{t.TrackerMessage, t.ErrorMessage, t.StatusMessage} {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		parts = append(parts, m)
+	}
+	return strings.Join(parts, "; ")
+}
+
 // handleTorrentGet processes torrent-get requests
 func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (interface{}, error) {
 	var params struct {
@@ -223,10 +260,10 @@ func (s *Server) handleTorrentGet(_ context.Context, args json.RawMessage) (inte
 		rateDownload := t.DownloadSpeed
 
 		// Pick the error to report. plundrio's permanently-failed cascade wins
-		// over put.io's ErrorMessage: if both are set, plundrio's reflects the
+		// over put.io's error fields: if both are set, plundrio's reflects the
 		// terminal decision (we already gave up retrying), and that's the one
 		// *arr should act on.
-		errString := t.ErrorMessage
+		errString := putioErrorString(t)
 		if prog.Error != "" {
 			errString = prog.Error
 		}
