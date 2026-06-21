@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/spf13/viper"
 )
@@ -134,11 +135,19 @@ func ApplyOverrides(v *viper.Viper, ov Overrides) []string {
 	return applied
 }
 
+// writeMu serializes the load-merge-write in WriteOverride. The atomic rename
+// prevents a torn file, but without this lock two concurrent writers (e.g. two
+// dashboard tabs PUTting at once) would each read the same base, merge their own
+// key, and one rename would clobber the other's update (lost update). Process-
+// global because override writes are rare and always target the one file.
+var writeMu sync.Mutex
+
 // WriteOverride merges the given key/value pairs into the overrides file at
 // path, preserving keys already present and not in updates. Only canonical
 // OverrideKeys are written; unknown keys are rejected so a typo can't silently
 // persist a dead key. Writes atomically (temp file + rename) with 0644, matching
-// the CategoryStore persistence precedent's permissions.
+// the CategoryStore persistence precedent's permissions. The load-merge-write is
+// serialized (writeMu) so concurrent writers can't lose each other's updates.
 //
 // A nil/empty value for a key is rejected by callers (validation lives in the
 // settings PUT handler); WriteOverride itself just persists what it's given.
@@ -151,6 +160,9 @@ func WriteOverride(path string, updates map[string]any) error {
 			return fmt.Errorf("refusing to persist unknown override key %q", k)
 		}
 	}
+
+	writeMu.Lock()
+	defer writeMu.Unlock()
 
 	existing, err := LoadOverrides(path)
 	if err != nil {
