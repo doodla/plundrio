@@ -39,6 +39,7 @@ type fakePutioClient struct {
 	uploadFileCalls     []uploadFileCall
 	addTransferCalls    []addTransferCall
 	deleteFileCalls     []int64
+	getTransfersCalls   int
 	deleteTransferCalls []int64
 
 	transfers []*putio.Transfer
@@ -83,6 +84,7 @@ func (f *fakePutioClient) GetAccountInfo(ctx context.Context) (*putio.AccountInf
 func (f *fakePutioClient) GetTransfers(ctx context.Context) ([]*putio.Transfer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getTransfersCalls++
 	return f.transfers, f.getTransfersErr
 }
 
@@ -532,6 +534,70 @@ func TestHandleTorrentRemoveDelegatesToPurgeTransfer(t *testing.T) {
 	// Category mapping should be cleaned up via dlService.RemoveCategory.
 	if got := dl.GetCategory("abc"); got != "" {
 		t.Errorf("category for abc after remove = %q, want empty", got)
+	}
+}
+
+func TestHandleTorrentRemoveBatchFetchesTransfersOnce(t *testing.T) {
+	// torrent-remove accepts an array of ids. Resolving each hash used to
+	// trigger a full GetTransfers round trip per id (an N+1 against put.io);
+	// the list is now fetched once and indexed by hash. Three ids => one call.
+	client := &fakePutioClient{
+		transfers: []*putio.Transfer{
+			{ID: 100, Hash: "a", FileID: 901, Name: "one"},
+			{ID: 200, Hash: "b", FileID: 902, Name: "two"},
+			{ID: 300, Hash: "c", FileID: 903, Name: "three"},
+		},
+	}
+	dl := newFakeDownloadService()
+	srv := newTestServer(t, client, dl)
+
+	req := rpcRequest(t, "torrent-remove", map[string]interface{}{
+		"ids":               []string{"a", "b", "c"},
+		"delete-local-data": false,
+	})
+	w := httptest.NewRecorder()
+	srv.handleRPC(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	client.mu.Lock()
+	calls := client.getTransfersCalls
+	client.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("GetTransfers calls = %d, want 1 (one fetch for the whole batch)", calls)
+	}
+	dl.mu.Lock()
+	purgeCalls := append([]int64(nil), dl.purgeTransferCalls...)
+	dl.mu.Unlock()
+	if len(purgeCalls) != 3 {
+		t.Errorf("PurgeTransfer calls = %v, want 3 purges", purgeCalls)
+	}
+}
+
+func TestHandleTorrentRemoveSurfacesListError(t *testing.T) {
+	// When the transfer-list fetch fails, the handler must report an error
+	// rather than silently returning success with nothing removed.
+	client := &fakePutioClient{getTransfersErr: errors.New("boom")}
+	dl := newFakeDownloadService()
+	srv := newTestServer(t, client, dl)
+
+	req := rpcRequest(t, "torrent-remove", map[string]interface{}{
+		"ids":               []string{"a"},
+		"delete-local-data": false,
+	})
+	w := httptest.NewRecorder()
+	srv.handleRPC(w, req)
+
+	resp := decodeRPCResponse(t, w.Body.Bytes())
+	if resp.Result == "success" {
+		t.Errorf("result = %q, want a non-success error result", resp.Result)
+	}
+	dl.mu.Lock()
+	purgeCalls := len(dl.purgeTransferCalls)
+	dl.mu.Unlock()
+	if purgeCalls != 0 {
+		t.Errorf("PurgeTransfer calls = %d, want 0 when list fetch fails", purgeCalls)
 	}
 }
 
