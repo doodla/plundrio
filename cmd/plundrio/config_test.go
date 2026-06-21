@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/doodla/plundrio/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -173,6 +175,65 @@ log_level: debug
 	}
 	if logLevel != "debug" {
 		t.Errorf("log level = %q, want debug", logLevel)
+	}
+}
+
+// TestSampleConfigLoads asserts the YAML emitted by `generate-config` is valid
+// and decodes cleanly through loadConfig.
+func TestSampleConfigLoads(t *testing.T) {
+	resetEnvAndViper(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "plundrio.yaml")
+	if err := os.WriteFile(cfgPath, []byte(sampleConfig), 0o600); err != nil {
+		t.Fatalf("write sample config: %v", err)
+	}
+
+	cmd := newTestRunCmd()
+	if err := cmd.ParseFlags([]string{"--config", cfgPath}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	cfg, logLevel, err := loadConfig(cmd)
+	if err != nil {
+		t.Fatalf("loadConfig on sample: %v", err)
+	}
+	if cfg.PutioFolder != "plundrio" {
+		t.Errorf("PutioFolder = %q, want plundrio", cfg.PutioFolder)
+	}
+	if logLevel != "info" {
+		t.Errorf("log level = %q, want info", logLevel)
+	}
+}
+
+// TestSampleConfigKeysMapToConfigFields parses the sample YAML on its own (no
+// flag-default merge to mask a typo) and asserts every top-level key
+// corresponds to a config.Config mapstructure tag. A key renamed on Config, or
+// a typo in the sample, fails here — the documented sample can't silently drift
+// from the struct it's supposed to mirror.
+func TestSampleConfigKeysMapToConfigFields(t *testing.T) {
+	// Known mapstructure tags on config.Config (skipping "-"), plus log_level:
+	// it's a documented sample key but not a Config field — loadConfig returns
+	// the resolved log level separately (see its doc comment).
+	known := map[string]bool{"log_level": true}
+	ct := reflect.TypeOf(config.Config{})
+	for i := 0; i < ct.NumField(); i++ {
+		tag := ct.Field(i).Tag.Get("mapstructure")
+		if tag != "" && tag != "-" {
+			known[tag] = true
+		}
+	}
+
+	v := viper.New()
+	v.SetConfigType("yaml")
+	if err := v.ReadConfig(strings.NewReader(sampleConfig)); err != nil {
+		t.Fatalf("sample config is not valid YAML: %v", err)
+	}
+
+	for key := range v.AllSettings() {
+		if !known[key] {
+			t.Errorf("sample config key %q has no matching config.Config mapstructure tag", key)
+		}
 	}
 }
 
