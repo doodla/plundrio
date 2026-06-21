@@ -27,6 +27,10 @@ type fakePutioClient struct {
 	deleteFileErr     error
 	deleteTransferErr error
 
+	// downloadURL, when set, is returned by GetDownloadURL so the real grab
+	// download path can be exercised against a local httptest server.
+	downloadURL string
+
 	// Optional programmable hooks for tests that need richer behavior
 	// (transfers_test.go uses these to drive the failed-retry cascade).
 	getAllTransferFilesFn func(fileID int64) ([]api.TransferFile, error)
@@ -60,7 +64,9 @@ func (f *fakePutioClient) RetryTransfer(ctx context.Context, transferID int64) (
 	return nil, nil
 }
 func (f *fakePutioClient) GetDownloadURL(ctx context.Context, fileID int64) (string, error) {
-	return "", nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.downloadURL, nil
 }
 func (f *fakePutioClient) DeleteFile(ctx context.Context, fileID int64) error {
 	f.mu.Lock()

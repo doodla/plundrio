@@ -30,6 +30,50 @@ func TestCheckDiskQuotaZeroSize(t *testing.T) {
 	}
 }
 
+// TestCheckDiskQuotaLatchAndRecovery covers the warning latch: usage >= 95%
+// reports over-quota and sets the one-shot warning; when usage later drops the
+// latch resets so a future spike can warn again.
+func TestCheckDiskQuotaLatchAndRecovery(t *testing.T) {
+	acc := &putio.AccountInfo{Username: "u"}
+	acc.Disk.Size = 1000
+	acc.Disk.Used = 960 // 96% — at/over the 95% threshold
+	fake := &fakePutioClient{accountInfo: acc}
+	srv := newTestServer(t, fake, newFakeDownloadService())
+
+	// Pin a controllable clock so we can expire the 60s account cache between
+	// the over-quota and recovery observations.
+	base := time.Now()
+	srv.now = func() time.Time { return base }
+
+	over, err := srv.checkDiskQuota()
+	if err != nil {
+		t.Fatalf("checkDiskQuota: %v", err)
+	}
+	if !over {
+		t.Error("over = false at 96% usage, want true")
+	}
+	if !srv.quotaWarning.Load() {
+		t.Error("quotaWarning latch not set after crossing threshold")
+	}
+
+	// Usage drops; expire the cache so the new figure is fetched.
+	fake.mu.Lock()
+	fake.accountInfo.Disk.Used = 500 // 50%
+	fake.mu.Unlock()
+	srv.now = func() time.Time { return base.Add(2 * time.Minute) }
+
+	over, err = srv.checkDiskQuota()
+	if err != nil {
+		t.Fatalf("checkDiskQuota (recovery): %v", err)
+	}
+	if over {
+		t.Error("over = true at 50% usage, want false")
+	}
+	if srv.quotaWarning.Load() {
+		t.Error("quotaWarning latch not reset after usage dropped")
+	}
+}
+
 // TestServerStartReturnsNilOnCleanStop guards the regression where Start
 // returned http.ErrServerClosed on a normal Stop. main.go log.Fatals on any
 // non-nil Start error, so leaking ErrServerClosed turned every clean SIGTERM
