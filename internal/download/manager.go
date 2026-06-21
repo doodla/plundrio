@@ -111,6 +111,17 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		dlConfig.TransferCheckInterval = cfg.TransferCheckInterval
 	}
 
+	// Stall handling: a configured (>0) StallTimeout opts in to the operator's
+	// values for both the timeout and the retry count; otherwise the package
+	// defaults (1h / 1 retry) stand. StallMaxRetries==0 is a meaningful value
+	// (delete on first stall), so it is only honored when StallTimeout signals
+	// the operator configured stall handling — a default-constructed Config
+	// (tests/demo) keeps the 1-retry default.
+	if cfg.StallTimeout > 0 {
+		dlConfig.StallTimeout = cfg.StallTimeout
+		dlConfig.StallMaxRetries = cfg.StallMaxRetries
+	}
+
 	// Override with user config if provided
 	workerCount := cfg.WorkerCount
 	if workerCount <= 0 {

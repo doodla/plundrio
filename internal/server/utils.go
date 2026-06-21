@@ -9,7 +9,7 @@ import (
 
 // checkDiskQuota checks disk usage and handles quota warnings
 func (s *Server) checkDiskQuota() (bool, error) {
-	account, err := s.client.GetAccountInfo(context.Background())
+	account, err := s.cachedAccountInfo(context.Background())
 	if err != nil {
 		return false, fmt.Errorf("failed to check disk quota: %w", err)
 	}

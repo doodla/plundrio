@@ -81,6 +81,237 @@ func makeTransferFile(id int64, size int64) api.TransferFile {
 	return api.TransferFile{File: f, RelPath: f.Name}
 }
 
+// getStallStateForTest returns the processor's putioStallState for a transfer,
+// failing the test if absent.
+func getStallStateForTest(t *testing.T, p *TransferProcessor, id int64) *putioStallState {
+	t.Helper()
+	v, ok := p.stallStates.Load(id)
+	if !ok {
+		t.Fatalf("no putioStallState for transfer %d", id)
+	}
+	return v.(*putioStallState)
+}
+
+// stallCallCounts reads the fake client's recorded retry/delete calls under its
+// lock.
+func stallCallCounts(c *fakePutioClient) (retries, deletes int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.retryTransferCalls), len(c.deleteTransferCalls)
+}
+
+func TestProcessStalledTransfersNoStallBeforeTimeout(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor
+	base := time.Now()
+
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base) // first observation
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(30 * time.Minute)) // well under 1h
+
+	if r, d := stallCallCounts(client); r != 0 || d != 0 {
+		t.Fatalf("expected no retry/delete before timeout, got retries=%d deletes=%d", r, d)
+	}
+	if st := getStallStateForTest(t, p, 1); !st.StatusSince.Equal(base) {
+		t.Fatalf("StatusSince = %v, want %v", st.StatusSince, base)
+	}
+}
+
+func TestProcessStalledTransfersDataProgressResetsWindow(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor
+	base := time.Now()
+
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base)
+	// Bytes advanced at base+50m — resets the window to base+50m.
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 1000})
+	p.processStalledTransfersAt(base.Add(50 * time.Minute))
+	// At base+80m only 30m has elapsed since the reset; without the reset it
+	// would have been 80m >= 1h and tripped a stall.
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 1000})
+	p.processStalledTransfersAt(base.Add(80 * time.Minute))
+
+	if r, d := stallCallCounts(client); r != 0 || d != 0 {
+		t.Fatalf("data progress must reset the window, got retries=%d deletes=%d", r, d)
+	}
+	st := getStallStateForTest(t, p, 1)
+	if !st.StatusSince.Equal(base.Add(50 * time.Minute)) {
+		t.Fatalf("StatusSince = %v, want %v (reset on byte progress)", st.StatusSince, base.Add(50*time.Minute))
+	}
+}
+
+func TestProcessStalledTransfersRetriesThenDeletes(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor // defaults: 1h timeout, 1 retry
+	base := time.Now()
+
+	tr := &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0}
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base) // observe
+
+	// Stage 1: no progress past the timeout -> one RetryTransfer.
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base.Add(61 * time.Minute))
+	if r, d := stallCallCounts(client); r != 1 || d != 0 {
+		t.Fatalf("stage 1: want retries=1 deletes=0, got retries=%d deletes=%d", r, d)
+	}
+	st := getStallStateForTest(t, p, 1)
+	if st.RetryCount != 1 || !st.StatusSince.Equal(base.Add(61*time.Minute)) {
+		t.Fatalf("stage 1 state: RetryCount=%d StatusSince=%v", st.RetryCount, st.StatusSince)
+	}
+
+	// Stage 2: still no progress a full window after the retry -> DeleteTransfer.
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base.Add(122 * time.Minute))
+	if r, d := stallCallCounts(client); r != 1 || d != 1 {
+		t.Fatalf("stage 2: want retries=1 deletes=1, got retries=%d deletes=%d", r, d)
+	}
+	if _, ok := p.stallStates.Load(int64(1)); ok {
+		t.Fatalf("stall state should be deleted after give-up delete")
+	}
+}
+
+func TestProcessStalledTransfersZeroMaxRetriesDeletesImmediately(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor
+	p.stallMaxRetries = 0
+	base := time.Now()
+
+	tr := &putio.Transfer{ID: 7, Status: "IN_QUEUE"}
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base)
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base.Add(61 * time.Minute))
+
+	if r, d := stallCallCounts(client); r != 0 || d != 1 {
+		t.Fatalf("zero max-retries: want retries=0 deletes=1, got retries=%d deletes=%d", r, d)
+	}
+}
+
+// TestProcessStalledTransfersStatusChurnStillStalls is the regression guard for
+// the flip-flop bug: a seederless magnet bounces between non-terminal statuses
+// every poll with frozen bytes. Status churn must NOT refresh the window, or
+// the timeout never trips and the transfer is never recovered.
+func TestProcessStalledTransfersStatusChurnStillStalls(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor // 1h timeout, 1 retry
+	base := time.Now()
+
+	// Bytes frozen at 0 throughout; only the status oscillates each tick.
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base)
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "IN_QUEUE", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(30 * time.Minute))
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(61 * time.Minute)) // 61m since base, frozen -> stall
+
+	if r, d := stallCallCounts(client); r != 1 || d != 0 {
+		t.Fatalf("status churn must not prevent stall: want retries=1 deletes=0, got retries=%d deletes=%d", r, d)
+	}
+
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "IN_QUEUE", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(91 * time.Minute))
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(122 * time.Minute)) // full window after retry -> delete
+
+	if r, d := stallCallCounts(client); r != 1 || d != 1 {
+		t.Fatalf("churning stalled transfer must be deleted: want retries=1 deletes=1, got retries=%d deletes=%d", r, d)
+	}
+}
+
+// TestProcessStalledTransfersRetryBudgetSurvivesActivity verifies the retry
+// budget is bounded across the non-terminal lifetime: data activity refreshes
+// the window (so an active transfer isn't killed) but does NOT reset RetryCount,
+// so a transfer that keeps stalling is still eventually deleted.
+func TestProcessStalledTransfersRetryBudgetSurvivesActivity(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor // 1h timeout, 1 retry
+	base := time.Now()
+
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base)
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 0})
+	p.processStalledTransfersAt(base.Add(61 * time.Minute)) // stall -> retry (RetryCount=1)
+	if r, _ := stallCallCounts(client); r != 1 {
+		t.Fatalf("expected one retry, got %d", r)
+	}
+
+	// Byte activity after the retry refreshes the window but must keep RetryCount.
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 100})
+	p.processStalledTransfersAt(base.Add(70 * time.Minute))
+	st := getStallStateForTest(t, p, 1)
+	if st.RetryCount != 1 || !st.StatusSince.Equal(base.Add(70*time.Minute)) {
+		t.Fatalf("activity should refresh window but keep budget: RetryCount=%d StatusSince=%v", st.RetryCount, st.StatusSince)
+	}
+
+	// Freeze again past the refreshed window: budget is spent -> delete.
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING", Downloaded: 100})
+	p.processStalledTransfersAt(base.Add(131 * time.Minute))
+	if r, d := stallCallCounts(client); r != 1 || d != 1 {
+		t.Fatalf("want retries=1 deletes=1, got retries=%d deletes=%d", r, d)
+	}
+}
+
+func TestProcessStalledTransfersIgnoresTerminalStatuses(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor
+	base := time.Now()
+
+	for _, status := range []string{"COMPLETED", "SEEDING", "ERROR", "COMPLETING"} {
+		setPutioTransfers(p, &putio.Transfer{ID: 1, Status: status})
+		p.processStalledTransfersAt(base)
+		p.processStalledTransfersAt(base.Add(2 * time.Hour))
+	}
+	if r, d := stallCallCounts(client); r != 0 || d != 0 {
+		t.Fatalf("terminal/COMPLETING statuses must be ignored, got retries=%d deletes=%d", r, d)
+	}
+	if _, ok := p.stallStates.Load(int64(1)); ok {
+		t.Fatalf("no stall state should exist for terminal statuses")
+	}
+}
+
+func TestProcessStalledTransfersPrunesVanishedEntries(t *testing.T) {
+	client := &fakePutioClient{}
+	p := newTestManagerWithClient(client).processor
+	base := time.Now()
+
+	setPutioTransfers(p, &putio.Transfer{ID: 1, Status: "DOWNLOADING"})
+	p.processStalledTransfersAt(base) // creates the entry
+	getStallStateForTest(t, p, 1)     // precondition: it exists
+
+	// Transfer disappears from the snapshot (completed/purged) -> entry pruned.
+	setPutioTransfers(p)
+	p.processStalledTransfersAt(base.Add(time.Minute))
+	if _, ok := p.stallStates.Load(int64(1)); ok {
+		t.Fatalf("stall state for a vanished transfer should be pruned")
+	}
+}
+
+func TestProcessStalledTransfersToleratesRetryError(t *testing.T) {
+	client := &fakePutioClient{
+		retryTransferFn: func(int64) (*putio.Transfer, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	p := newTestManagerWithClient(client).processor
+	base := time.Now()
+
+	tr := &putio.Transfer{ID: 1, Status: "DOWNLOADING"}
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base)
+	setPutioTransfers(p, tr)
+	p.processStalledTransfersAt(base.Add(61 * time.Minute))
+
+	if r, d := stallCallCounts(client); r != 1 || d != 0 {
+		t.Fatalf("retry error: want retries=1 deletes=0, got retries=%d deletes=%d", r, d)
+	}
+	if st := getStallStateForTest(t, p, 1); st.RetryCount != 1 {
+		t.Fatalf("RetryCount must advance despite retry error, got %d", st.RetryCount)
+	}
+}
+
 func TestProcessFailedTransfersRequeuesImmediatelyOnFirstFailure(t *testing.T) {
 	client := &fakePutioClient{
 		getAllTransferFilesFn: func(fileID int64) ([]api.TransferFile, error) {

@@ -27,6 +27,17 @@ type DownloadConfig struct {
 
 	// CopyTimeout is the timeout for waiting for the copy operation to complete after cancellation
 	CopyTimeout time.Duration
+
+	// StallTimeout is how long a put.io transfer may sit in a non-terminal
+	// status (IN_QUEUE/WAITING/PREPARING/DOWNLOADING) making no progress before
+	// it is treated as stalled and retried/surfaced. Distinct from
+	// DownloadStallTimeout, which governs the local CDN download, not the
+	// put.io-side fetch.
+	StallTimeout time.Duration
+
+	// StallMaxRetries is how many times a stalled put.io transfer is retried
+	// (via RetryTransfer) before being deleted. 0 = delete on first stall.
+	StallMaxRetries int
 }
 
 // GetDefaultConfig returns a DownloadConfig with reasonable default values
@@ -40,5 +51,7 @@ func GetDefaultConfig() *DownloadConfig {
 		DownloadHeaderTimeout:  30 * time.Second, // 30 second timeout for response headers
 		DownloadStallTimeout:   2 * time.Minute,  // Cancel download if stalled for 2 minutes
 		CopyTimeout:            10 * time.Second, // Wait 10 seconds for copy to complete after cancellation
+		StallTimeout:           1 * time.Hour,    // Treat a no-progress put.io transfer as stalled after 1h
+		StallMaxRetries:        1,                // Retry a stalled transfer once before deleting it
 	}
 }
