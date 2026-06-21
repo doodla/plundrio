@@ -149,8 +149,10 @@ func (s *Server) Start() error {
 		Handler: mux,
 	}
 
-	// Get and log account info
-	account, err := s.client.GetAccountInfo(context.Background())
+	// Get and log account info. Goes through the cache so the immediately
+	// following checkDiskQuota (and the first torrent-add) reuse this fetch
+	// instead of each issuing their own account.info call.
+	account, err := s.cachedAccountInfo(context.Background())
 	if err != nil {
 		log.Warn("server").Err(err).Msg("Failed to get account info")
 	} else {

@@ -98,6 +98,15 @@ func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 // success return immediately. Backoff respects ctx cancellation between
 // attempts. After rlMaxRetries are exhausted it returns the last 429 error so
 // callers still observe a failure instead of blocking indefinitely.
+//
+// Why per-method wrapping rather than a transport-level http.RoundTripper
+// (which would cover every call automatically): a retried request must replay
+// its body, and UploadFile's body is a consumed io.Reader. The underlying
+// go-putio client doesn't set Request.GetBody, so a RoundTripper couldn't
+// safely re-send an upload — whereas wrapping at this layer lets UploadFile
+// rebuild its bytes.Reader per attempt (see client.go). The cost is that a new
+// client method must opt in by wrapping its call; that's the deliberate
+// trade. Do NOT double-wrap recursive helpers (see GetAllTransferFiles).
 func (c *Client) withRateLimitRetry(ctx context.Context, op string, fn func() error) error {
 	for attempt := 0; ; attempt++ {
 		err := fn()
