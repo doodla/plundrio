@@ -3,6 +3,8 @@ package download
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -76,6 +78,54 @@ func TestCategoryStore_LoadMissingFile(t *testing.T) {
 
 	if got := cs.Get("anything"); got != "" {
 		t.Errorf("Get after Load of missing file = %q, want %q", got, "")
+	}
+}
+
+func TestCategoryStore_SaveLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCategoryStore(dir)
+
+	cs.Set("hash1", "tv")
+	cs.Set("hash2", "movies")
+	cs.Remove("hash1")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	// Only the state file should remain — the atomic temp file is renamed away.
+	for _, e := range entries {
+		if e.Name() != stateFileName {
+			t.Errorf("unexpected leftover file in state dir: %q", e.Name())
+		}
+	}
+}
+
+func TestCategoryStore_ConcurrentSavesPersistConsistently(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCategoryStore(dir)
+
+	// Hammer Set from many goroutines. With atomic temp+rename and saveMu, the
+	// on-disk file must always be complete, parseable JSON — never a truncated
+	// half-write. The final reload must see every key.
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cs.Set("hash"+strconv.Itoa(i), "cat"+strconv.Itoa(i))
+		}(i)
+	}
+	wg.Wait()
+
+	cs2 := newCategoryStore(dir)
+	cs2.Load()
+	for i := 0; i < n; i++ {
+		want := "cat" + strconv.Itoa(i)
+		if got := cs2.Get("hash" + strconv.Itoa(i)); got != want {
+			t.Errorf("after concurrent saves Get(hash%d) = %q, want %q", i, got, want)
+		}
 	}
 }
 
