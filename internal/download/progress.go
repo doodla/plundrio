@@ -39,13 +39,17 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 					state.downloaded = bytesComplete
 					state.Progress = resp.Progress()
 
-					// Calculate ETA based on current download rate
+					// Average download rate since start. Guarded against a zero
+					// elapsed so speedBps never becomes +Inf/NaN — it feeds the ETA,
+					// the dashboard's rate_download, and the RPC rateDownload, none
+					// of which should ever see a bogus rate.
 					elapsed := time.Since(state.StartTime).Seconds()
+					var speedBps float64
 					if elapsed > 0 {
-						speed := float64(state.downloaded) / elapsed
-						remaining := float64(totalSize - state.downloaded)
-						if speed > 0 {
-							etaSeconds := remaining / speed
+						speedBps = float64(state.downloaded) / elapsed
+						if speedBps > 0 {
+							remaining := float64(totalSize - state.downloaded)
+							etaSeconds := remaining / speedBps
 							state.ETA = time.Now().Add(time.Duration(etaSeconds) * time.Second)
 						}
 					}
@@ -53,7 +57,7 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 					downloadedMB := float64(state.downloaded) / 1024 / 1024
 					totalMB := float64(totalSize) / 1024 / 1024
 					progress := state.Progress * 100
-					speedMBps := downloadedMB / elapsed
+					speedMBps := speedBps / 1024 / 1024
 					eta := time.Until(state.ETA).Round(time.Second)
 					state.LastProgress = time.Now()
 					state.mu.Unlock()
@@ -61,7 +65,7 @@ func (m *Manager) monitorGrabDownloadProgress(ctx context.Context, state *Downlo
 					// Update transfer context with downloaded bytes if it exists
 					if exists && bytesDelta > 0 {
 						transferCtx.AddDownloadedBytes(bytesDelta)
-						transferCtx.SetLocalProgress(speedMBps*1024*1024, state.ETA)
+						transferCtx.SetLocalProgress(speedBps, state.ETA)
 
 						downloadedSize, transferTotal, _, _ := transferCtx.GetProgress()
 
