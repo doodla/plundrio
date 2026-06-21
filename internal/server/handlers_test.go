@@ -575,6 +575,51 @@ func TestHandleTorrentRemoveBatchFetchesTransfersOnce(t *testing.T) {
 	}
 }
 
+func TestHandleTorrentRemovePartialBatchSkipsUnknown(t *testing.T) {
+	// A batch mixing a known hash with one that isn't in the transfer list must
+	// purge only the known transfer, skip the missing one, and still report
+	// success — all from a single GetTransfers fetch.
+	client := &fakePutioClient{
+		transfers: []*putio.Transfer{
+			{ID: 100, Hash: "known", FileID: 9, Name: "x"},
+		},
+	}
+	dl := newFakeDownloadService()
+	dl.SetCategory("known", "tv")
+	srv := newTestServer(t, client, dl)
+
+	req := rpcRequest(t, "torrent-remove", map[string]interface{}{
+		"ids":               []string{"known", "missing"},
+		"delete-local-data": false,
+	})
+	w := httptest.NewRecorder()
+	srv.handleRPC(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := decodeRPCResponse(t, w.Body.Bytes())
+	if resp.Result != "success" {
+		t.Errorf("result = %q, want success", resp.Result)
+	}
+	dl.mu.Lock()
+	purgeCalls := append([]int64(nil), dl.purgeTransferCalls...)
+	dl.mu.Unlock()
+	if len(purgeCalls) != 1 || purgeCalls[0] != 100 {
+		t.Errorf("PurgeTransfer calls = %v, want [100] (missing hash skipped)", purgeCalls)
+	}
+	client.mu.Lock()
+	calls := client.getTransfersCalls
+	client.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("GetTransfers calls = %d, want 1 for the whole batch", calls)
+	}
+	// The known transfer's category mapping is cleaned up.
+	if got := dl.GetCategory("known"); got != "" {
+		t.Errorf("category for known after remove = %q, want empty", got)
+	}
+}
+
 func TestHandleTorrentRemoveSurfacesListError(t *testing.T) {
 	// When the transfer-list fetch fails, the handler must report an error
 	// rather than silently returning success with nothing removed.
