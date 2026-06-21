@@ -38,9 +38,11 @@ func (s *Server) sendResponse(w http.ResponseWriter, tag interface{}, result int
 		Arguments: result,
 	}
 
-	// Log the response for debugging
-	respBytes, _ := json.Marshal(resp)
-	log.Debug("server").Msgf("Sending response: %s", string(respBytes))
+	// Log the response for debugging. Pass resp as a deferred field rather than
+	// pre-marshaling: zerolog only serializes it when debug is actually enabled,
+	// so the common case (info level, three *arrs polling torrent-get every few
+	// seconds) no longer marshals the full torrent list twice per response.
+	log.Debug("server").Interface("response", resp).Msg("Sending response")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Transmission-Session-Id", "123") // Ensure session ID is always sent
