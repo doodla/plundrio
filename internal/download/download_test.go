@@ -8,6 +8,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"time"
 
 	grab "github.com/cavaliergopher/grab/v3"
 )
@@ -102,5 +103,70 @@ func TestIsTransientError(t *testing.T) {
 				t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDownloadWithRetryStopsAtMaxAttempts(t *testing.T) {
+	m := newTestManagerWithClient(&fakePutioClient{})
+	m.retryBackoffBase = time.Microsecond // keep the backoff negligible
+
+	// A persistently transient error must be retried exactly maxRetries (3)
+	// times, then give up. The backoff after the final attempt is skipped.
+	attempts := 0
+	transient := fmt.Errorf(`Get "https://cdn/x": read tcp 1.2.3.4:443: read: %w`, syscall.ECONNRESET)
+	m.downloadFileFn = func(*DownloadState) error {
+		attempts++
+		return transient
+	}
+
+	err := m.downloadWithRetry(&DownloadState{Name: "x", FileID: 1, TransferID: 1})
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestDownloadWithRetryDoesNotRetryPermanentError(t *testing.T) {
+	m := newTestManagerWithClient(&fakePutioClient{})
+
+	attempts := 0
+	m.downloadFileFn = func(*DownloadState) error {
+		attempts++
+		return errors.New("404 not found") // not classified transient
+	}
+
+	if err := m.downloadWithRetry(&DownloadState{Name: "x"}); err == nil {
+		t.Fatal("expected permanent error, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (no retry on permanent error)", attempts)
+	}
+}
+
+func TestDownloadWithRetryBackoffCancelledByShutdown(t *testing.T) {
+	m := newTestManagerWithClient(&fakePutioClient{})
+	// Large backoff so the test would hang for seconds if the select didn't
+	// honor stopChan — proving the cancellable-backoff path.
+	m.retryBackoffBase = time.Hour
+
+	transient := fmt.Errorf(`Get "https://cdn/x": read tcp: read: %w`, syscall.ECONNRESET)
+	m.downloadFileFn = func(*DownloadState) error { return transient }
+
+	// Close stopChan so the first backoff select returns immediately.
+	close(m.stopChan)
+
+	done := make(chan error, 1)
+	go func() { done <- m.downloadWithRetry(&DownloadState{Name: "x"}) }()
+
+	select {
+	case err := <-done:
+		var de *DownloadError
+		if !errors.As(err, &de) || de.Type != "DownloadCancelled" {
+			t.Errorf("err = %v, want DownloadCancelled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("downloadWithRetry did not return promptly on shutdown during backoff")
 	}
 }

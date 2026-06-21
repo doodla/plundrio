@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/api"
@@ -60,6 +61,16 @@ type Manager struct {
 	workerCount int
 
 	processor *TransferProcessor // Handles transfer processing
+
+	// downloadFileFn performs a single download attempt; it is a seam (defaults
+	// to m.downloadFile in New) so downloadWithRetry's retry/backoff/cancellation
+	// logic is unit-testable without touching the network. Mirrors the
+	// clock/sleeper injection used in the api package and processFailedTransfersAt.
+	downloadFileFn func(*DownloadState) error
+	// retryBackoffBase is the base unit of the linear download backoff (attempt N
+	// waits N*base). Defaults to time.Second in New; tests set it low to keep the
+	// retry path fast.
+	retryBackoffBase time.Duration
 }
 
 // Context returns the manager's lifecycle context.
@@ -140,6 +151,10 @@ func New(cfg *config.Config, client PutioClient) *Manager {
 		workerQuit:  make(chan struct{}, 256),
 		activeFiles: sync.Map{},
 	}
+
+	// Default the download seams to production behavior; tests override them.
+	m.downloadFileFn = m.downloadFile
+	m.retryBackoffBase = time.Second
 
 	// Initialize coordinator and processor
 	m.processor = newTransferProcessor(m)

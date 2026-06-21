@@ -81,7 +81,7 @@ func (m *Manager) downloadWithRetry(state *DownloadState) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if err := m.downloadFile(state); err != nil {
+		if err := m.downloadFileFn(state); err != nil {
 			// Check for cancellation first - pass it through without wrapping
 			if downloadErr, ok := err.(*DownloadError); ok && downloadErr.Type == "DownloadCancelled" {
 				return err
@@ -91,13 +91,25 @@ func (m *Manager) downloadWithRetry(state *DownloadState) error {
 			if !isTransientError(err) {
 				return fmt.Errorf("permanent error on attempt %d: %w", attempt, err)
 			}
+			// No point backing off after the final attempt — we're about to
+			// give up. Avoids a wasted multi-second sleep per file that's going
+			// to fail anyway (and that the failed-transfer cascade will retry).
+			if attempt == maxRetries {
+				break
+			}
 			log.Warn("download").
 				Str("file_name", state.Name).
 				Int64("file_id", state.FileID).
 				Int("attempt", attempt).
 				Err(err).
 				Msg("Retrying download after error")
-			time.Sleep(time.Second * time.Duration(attempt))
+			// Cancellable backoff: a shutdown must retire the worker promptly
+			// rather than blocking Stop()'s workerWg.Wait() on a full sleep.
+			select {
+			case <-time.After(m.retryBackoffBase * time.Duration(attempt)):
+			case <-m.stopChan:
+				return NewDownloadCancelledError(state.Name, "shutdown during retry backoff")
+			}
 			continue
 		}
 		return nil
