@@ -1536,24 +1536,74 @@ footer {
   .palpick button {
     padding: 0 8px;
   }
+  /* Stack the Deck master panel: hero bay above the account cluster, each full
+     width. Desktop is `400px 1fr`; left un-collapsed it forced the panel (and
+     its children .bay/.cluster) ~573px wide inside a ~396px viewport, clipped
+     by main's overflow. */
+  .panel {
+    /* minmax(0,1fr), NOT 1fr: a bare 1fr is minmax(auto,1fr), and `auto` sizes
+       to the bay's min-content — which the nowrap .bayName title inflates to
+       ~540px, blowing the column past the viewport. minmax(0,…) lets it shrink
+       to the container so .bayName's ellipsis can engage. */
+    grid-template-columns: minmax(0, 1fr);
+  }
   .bay {
     padding: 20px 16px 18px;
+    /* grid items default to min-width:auto (=min-content); 0 lets the bay
+       shrink so its nowrap title truncates instead of widening the track. */
+    min-width: 0;
+    /* divider moves from right edge to bottom now that the panel is stacked */
+    border-right: none;
+    border-bottom: 1px solid var(--hair);
   }
   .flowgauge {
     width: min(320px, 76vw);
     height: auto;
     aspect-ratio: 1;
   }
+  /* The gauge SVG (viewBox 200x200, no width attr) renders at its intrinsic
+     ~419px and spilled past the container; scale it to fill the box. */
+  .flowgauge svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  /* Stack the two transfer phases (put.io fetch / local download) so each gets
+     the full card width instead of two min-content columns overflowing. */
+  .legend {
+    grid-template-columns: 1fr;
+  }
+  /* Let the gauge key chips wrap instead of running off the right edge. */
+  .fgKeys {
+    flex-wrap: wrap;
+  }
   .cluster {
     grid-template-columns: 1fr;
     padding: 16px;
     gap: 12px;
   }
+  /* Log lines: bar + time + wrapping message. Level and component are dropped
+     on mobile to give the message room; the message wraps (logs are for
+     reading) instead of the desktop one-line ellipsis, and minmax(0,1fr) keeps
+     its nowrap-driven min-content from inflating the track off-screen. */
   .ln {
-    grid-template-columns: 5px 64px 110px 1fr;
+    grid-template-columns: 5px 56px minmax(0, 1fr);
+    gap: 9px;
   }
-  .ln .l {
+  .ln .l,
+  .ln .c {
     display: none;
+  }
+  .ln .m {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+  /* Console filter bar: let the level chips + the margin-left:auto autoscroll
+     toggle wrap to a second line on very narrow phones instead of overflowing. */
+  .cHead {
+    flex-wrap: wrap;
   }
   .tr {
     grid-template-columns: 52px 1fr;
