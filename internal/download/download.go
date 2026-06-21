@@ -145,14 +145,10 @@ func isTransientError(err error) bool {
 		}
 	}
 
-	// Retryable HTTP status codes from grab's response error.
-	for _, code := range []string{"429", "502", "503", "504"} {
-		if strings.Contains(msg, code) {
-			return true
-		}
-	}
-
-	return false
+	// Retryable HTTP status codes from grab's CDN response or put.io's
+	// GetDownloadURL, matched on the typed errors rather than substrings (see
+	// retryableHTTPStatus).
+	return retryableHTTPStatus(err)
 }
 
 // downloadFile downloads a file from Put.io to the target directory using grab
