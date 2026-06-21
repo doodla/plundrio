@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -11,6 +13,13 @@ import (
 	"github.com/doodla/plundrio/internal/download"
 	"github.com/doodla/plundrio/internal/log"
 )
+
+// accountCacheTTL bounds how stale the cached AccountInfo used by the
+// torrent-add free-space check may be. A burst of grabs from *arr would
+// otherwise fire one account.info call per add; 60s collapses that to at most
+// one call per minute while keeping the free-space figure fresh enough for a
+// floor check.
+const accountCacheTTL = 60 * time.Second
 
 // PutioClient abstracts the put.io API methods used by the RPC server.
 type PutioClient interface {
@@ -46,17 +55,82 @@ type Server struct {
 	stopChan     chan struct{}
 	dlService    DownloadService
 	quotaWarning atomic.Bool // tracks if we've already warned about quota
+
+	// minFreeSpace is cfg.MinFreeSpace parsed to bytes once at construction.
+	// 0 disables the torrent-add free-space check.
+	minFreeSpace int64
+
+	// accountMu guards the cached AccountInfo used by the free-space check.
+	// Refreshes happen under the lock (single-flight): a burst of concurrent
+	// adds blocks on at most one account.info fetch per accountCacheTTL.
+	accountMu       sync.Mutex
+	cachedAccount   *putio.AccountInfo
+	cachedAccountAt time.Time
 }
 
 // New creates a new RPC server
 func New(cfg *config.Config, client PutioClient, dlService DownloadService) *Server {
-	return &Server{
-		cfg:         cfg,
-		client:      client,
-		stopChan:    make(chan struct{}),
-		dlService:   dlService,
-		quotaTicker: time.NewTicker(15 * time.Minute),
+	// cfg.MinFreeSpace is validated at startup (cmd/plundrio), so a parse error
+	// here is not expected; fail open (disable the floor) and warn rather than
+	// block all adds on a bad value that slipped through.
+	minFree, err := config.ParseByteSize(cfg.MinFreeSpace)
+	if err != nil {
+		log.Warn("server").
+			Str("min_free_space", cfg.MinFreeSpace).
+			Err(err).
+			Msg("Invalid min_free_space; disabling free-space check")
+		minFree = 0
 	}
+	return &Server{
+		cfg:          cfg,
+		client:       client,
+		stopChan:     make(chan struct{}),
+		dlService:    dlService,
+		quotaTicker:  time.NewTicker(15 * time.Minute),
+		minFreeSpace: minFree,
+	}
+}
+
+// cachedAccountInfo returns put.io AccountInfo no older than accountCacheTTL,
+// fetching a fresh copy under accountMu when the cache is cold or stale.
+func (s *Server) cachedAccountInfo(ctx context.Context) (*putio.AccountInfo, error) {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+
+	if s.cachedAccount != nil && time.Since(s.cachedAccountAt) < accountCacheTTL {
+		return s.cachedAccount, nil
+	}
+	account, err := s.client.GetAccountInfo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.cachedAccount = account
+	s.cachedAccountAt = time.Now()
+	return account, nil
+}
+
+// ensureFreeSpace rejects an add when put.io free space is below the configured
+// floor. Disabled when minFreeSpace == 0. Fails OPEN: a put.io lookup error logs
+// a warning and returns nil so a transient API hiccup never blocks downloads.
+func (s *Server) ensureFreeSpace(ctx context.Context) error {
+	if s.minFreeSpace <= 0 {
+		return nil
+	}
+	account, err := s.cachedAccountInfo(ctx)
+	if err != nil {
+		log.Warn("server").
+			Err(err).
+			Msg("Free-space check skipped: could not fetch put.io account info")
+		return nil
+	}
+	if account.Disk.Avail < s.minFreeSpace {
+		log.Warn("server").
+			Int64("avail_bytes", account.Disk.Avail).
+			Int64("min_free_bytes", s.minFreeSpace).
+			Msg("Rejecting torrent-add: put.io free space below configured floor")
+		return fmt.Errorf("put.io free space %d bytes is below the configured minimum of %d bytes", account.Disk.Avail, s.minFreeSpace)
+	}
+	return nil
 }
 
 // Start begins listening for RPC requests

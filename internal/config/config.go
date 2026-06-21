@@ -97,4 +97,14 @@ type Config struct {
 	// being deleted. 0 = delete on first stall (no retry). Only applied
 	// alongside StallTimeout (see download.New); the CLI flag default is 1.
 	StallMaxRetries int `mapstructure:"stall_max_retries"`
+
+	// MinFreeSpace is an opt-in floor on put.io free space (AccountInfo.Disk.Avail)
+	// below which torrent-add is rejected, so *arr fails the grab and tries
+	// another release instead of queueing a download put.io has no room for.
+	// Human-readable (e.g. "20GB", "10GiB"); empty string disables the check.
+	// Stored as a string (parsed via ParseByteSize at use, like
+	// DownloadStartWindow's "HH:MM" strings) so it plumbs through viper/env/yaml
+	// with no custom decode hook. The check fails OPEN: if the put.io account
+	// lookup errors, the add proceeds — this is a safety floor, not a hard gate.
+	MinFreeSpace string `mapstructure:"min_free_space"`
 }

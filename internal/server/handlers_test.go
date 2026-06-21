@@ -48,6 +48,12 @@ type fakePutioClient struct {
 	deleteFileErr     error
 	deleteTransferErr error
 	getTransfersErr   error
+
+	// accountInfo / getAccountInfoErr drive GetAccountInfo; accountInfoCalls
+	// counts invocations so tests can assert the 60s cache collapses bursts.
+	accountInfo       *putio.AccountInfo
+	getAccountInfoErr error
+	accountInfoCalls  int
 }
 
 type uploadFileCall struct {
@@ -62,6 +68,15 @@ type addTransferCall struct {
 }
 
 func (f *fakePutioClient) GetAccountInfo(ctx context.Context) (*putio.AccountInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accountInfoCalls++
+	if f.getAccountInfoErr != nil {
+		return nil, f.getAccountInfoErr
+	}
+	if f.accountInfo != nil {
+		return f.accountInfo, nil
+	}
 	return &putio.AccountInfo{Username: "test"}, nil
 }
 

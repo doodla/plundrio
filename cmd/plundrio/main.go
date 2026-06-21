@@ -43,6 +43,7 @@ var flagViperBindings = map[string]string{
 	"transfer-check-interval": "transfer_check_interval",
 	"stall-timeout":           "stall_timeout",
 	"stall-max-retries":       "stall_max_retries",
+	"min-free-space":          "min_free_space",
 	"log-level":               "log_level",
 	"dashboard":               "dashboard",
 	"dashboard-addr":          "dashboard_addr",
@@ -208,6 +209,7 @@ var runCmd = &cobra.Command{
 			Dur("post_complete_retention", cfg.PostCompleteRetention).
 			Dur("stall_timeout", cfg.StallTimeout).
 			Int("stall_max_retries", cfg.StallMaxRetries).
+			Str("min_free_space", cfg.MinFreeSpace).
 			Bool("download_start_window_enabled", cfg.DownloadStartWindow.Enabled).
 			Str("download_start_window_start", cfg.DownloadStartWindow.Start).
 			Str("download_start_window_end", cfg.DownloadStartWindow.End).
@@ -251,6 +253,13 @@ var runCmd = &cobra.Command{
 			log.Fatal("config").
 				Dur("interval", cfg.TransferCheckInterval).
 				Msg("transfer_check_interval below 5s is not allowed outside demo mode")
+		}
+
+		// Validate the free-space floor up front so a typo ("10 PB", "abc")
+		// fails fast at startup rather than silently disabling the check deep in
+		// server.New.
+		if _, err := config.ParseByteSize(cfg.MinFreeSpace); err != nil {
+			log.Fatal("config").Err(err).Msg("Invalid min_free_space value")
 		}
 
 		// Initialize the put.io client. Demo mode swaps in the in-process fake
@@ -387,6 +396,8 @@ post_complete_retention: 24h # Grace before DeleteTransfer on put.io after local
 stall_timeout: 1h            # No-progress window before a put.io transfer is
                              # treated as stalled (then retried, then deleted).
 stall_max_retries: 1         # Stall retries before deleting (0 = delete on first stall).
+min_free_space: ""           # Opt-in floor on put.io free space (e.g. "20GB",
+                             # "10GiB"); reject torrent-add below it. Empty disables.
 download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
@@ -396,6 +407,7 @@ log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
 # PLDR_POST_COMPLETE_RETENTION, PLDR_STALL_TIMEOUT, PLDR_STALL_MAX_RETRIES,
+# PLDR_MIN_FREE_SPACE,
 # PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
 # PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
 `
@@ -505,6 +517,7 @@ func registerRunFlags(cmd *cobra.Command) {
 	cmd.Flags().Duration("transfer-check-interval", 0, "How often to poll put.io for transfer state. 0 = default (30s). Values below 5s are rejected outside demo mode to avoid hammering the put.io API (risks HTTP 429 rate limiting).")
 	cmd.Flags().Duration("stall-timeout", time.Hour, "How long a put.io transfer may sit in a non-terminal status (queued/preparing/downloading) with no progress before it is treated as stalled and retried, then deleted. A no-seeder torrent never reaches ERROR on put.io, so without this *arr waits forever. Keep generous — put.io legitimately queues for minutes.")
 	cmd.Flags().Int("stall-max-retries", 1, "How many times a stalled put.io transfer is retried (RetryTransfer) before being deleted. 0 = delete on first stall.")
+	cmd.Flags().String("min-free-space", "", "Opt-in floor on put.io free space below which torrent-add is rejected so *arr tries another release. Human-readable (e.g. \"20GB\", \"10GiB\"); empty disables. The check fails open: a put.io account-info error lets the add proceed.")
 	cmd.Flags().String("log-level", "", "Log level (debug,info,warn,error,fatal,none)")
 	cmd.Flags().Bool("dashboard", false, "Enable the web dashboard (default off). Also via PLDR_DASHBOARD=true.")
 	cmd.Flags().String("dashboard-addr", ":9092", "Address the web dashboard binds when enabled. Also via PLDR_DASHBOARD_ADDR.")

@@ -77,6 +77,12 @@ func (s *Server) handleTorrentAdd(ctx context.Context, args json.RawMessage) (in
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 
+	// Reject before consuming put.io space when free space is below the floor.
+	// Applies to both .torrent uploads and magnets. No-op unless configured.
+	if err := s.ensureFreeSpace(ctx); err != nil {
+		return nil, err
+	}
+
 	category := extractCategory(s.cfg.TargetDir, params.DownloadDir)
 	var name string
 	var hash string
