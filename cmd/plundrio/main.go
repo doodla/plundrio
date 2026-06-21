@@ -388,18 +388,21 @@ var runCmd = &cobra.Command{
 	},
 }
 
-var generateConfigCmd = &cobra.Command{
-	Use:   "generate-config",
-	Short: "Generate sample configuration file",
-	Run: func(cmd *cobra.Command, args []string) {
-		cfg := `# Plundrio configuration
+// sampleConfig is the YAML emitted by `generate-config`. Kept as a package
+// const (not inline) so a test can parse it and assert every key still maps to
+// a config.Config field — the same drift the flagViperBindings comment warns
+// about, but for the documented sample. Keep keys in sync with config.Config's
+// mapstructure tags.
+const sampleConfig = `# Plundrio configuration
 # Save as ~/.plundrio.yaml or specify with --config
 
-target: /path/to/downloads	# Target directory for downloads
-folder: "plundrio"					# Folder name on Put.io
-token: "" 									# Get a token with get-token
-listen: ":9091"							# Transmission RPC server address
-workers: 4									# Number of download workers
+target: /path/to/downloads   # Target directory for downloads
+folder: "plundrio"           # Folder name on Put.io
+token: ""                    # Get a token with get-token
+listen: ":9091"              # Transmission RPC server address
+workers: 4                   # Number of download workers
+transfer_check_interval: 0s  # How often to poll put.io for transfer state.
+                             # 0 = default (30s); values below 5s are rejected.
 post_complete_retention: 24h # Grace before DeleteTransfer on put.io after local
                              # download completes (window for *arr's torrent-remove);
                              # 0 disables — rely on the client to remove.
@@ -408,19 +411,28 @@ stall_timeout: 1h            # No-progress window before a put.io transfer is
 stall_max_retries: 1         # Stall retries before deleting (0 = delete on first stall).
 min_free_space: ""           # Opt-in floor on put.io free space (e.g. "20GB",
                              # "10GiB"); reject torrent-add below it. Empty disables.
+dashboard: false             # Enable the read-only web dashboard (default off).
+dashboard_addr: ":9092"      # Address the dashboard binds when enabled.
 download_start_window:       # Optional local download start window
   enabled: false
   start: "23:00"
   end: "05:00"
-log_level: "info"					  # Log level (debug,info,warn,error,fatal,none)
+log_level: "info"            # Log level (debug,info,warn,error,fatal,none)
 
 # Environment variables:
 # PLDR_TARGET, PLDR_FOLDER, PLDR_TOKEN, PLDR_LISTEN, PLDR_WORKERS,
-# PLDR_POST_COMPLETE_RETENTION, PLDR_STALL_TIMEOUT, PLDR_STALL_MAX_RETRIES,
-# PLDR_MIN_FREE_SPACE,
+# PLDR_TRANSFER_CHECK_INTERVAL, PLDR_POST_COMPLETE_RETENTION,
+# PLDR_STALL_TIMEOUT, PLDR_STALL_MAX_RETRIES, PLDR_MIN_FREE_SPACE,
+# PLDR_DASHBOARD, PLDR_DASHBOARD_ADDR,
 # PLDR_DOWNLOAD_START_WINDOW_ENABLED, PLDR_DOWNLOAD_START_WINDOW_START,
 # PLDR_DOWNLOAD_START_WINDOW_END, PLDR_LOG_LEVEL
 `
+
+var generateConfigCmd = &cobra.Command{
+	Use:   "generate-config",
+	Short: "Generate sample configuration file",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := sampleConfig
 
 		outputPath := "plundrio-config.yaml"
 		if len(args) > 0 {
