@@ -9,6 +9,33 @@ import (
 	"testing"
 )
 
+// TestAuthenticateRejectsEmptyUsername: a 200 response whose account has no
+// username is treated as an auth failure (a malformed/invalid-token response),
+// while a populated username authenticates.
+func TestAuthenticateRejectsEmptyUsername(t *testing.T) {
+	t.Run("empty username fails", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"info":{"username":""}}`))
+		}))
+		defer srv.Close()
+		c := newTestClient(t, srv.URL)
+		if err := c.Authenticate(context.Background()); err == nil {
+			t.Error("expected error for empty username, got nil")
+		}
+	})
+
+	t.Run("populated username succeeds", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"info":{"username":"alice"}}`))
+		}))
+		defer srv.Close()
+		c := newTestClient(t, srv.URL)
+		if err := c.Authenticate(context.Background()); err != nil {
+			t.Errorf("Authenticate: %v", err)
+		}
+	})
+}
+
 // newTestClient builds an api.Client whose underlying go-putio client is pointed
 // at baseURL (an httptest server) instead of the real put.io. It reaches into
 // the unexported client field — legal within the package — because there is no
