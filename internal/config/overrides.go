@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/doodla/plundrio/internal/atomicfile"
 	"github.com/spf13/viper"
 )
 
@@ -180,31 +180,12 @@ func WriteOverride(path string, updates map[string]any) error {
 		return fmt.Errorf("marshal overrides: %w", err)
 	}
 
-	// Unique temp name (not a fixed path+".tmp") so two concurrent writers —
-	// e.g. two dashboard tabs PUTting settings at once — can't clobber each
-	// other's half-written temp file before the rename. Each rename atomically
-	// replaces the target; last writer wins, no corruption.
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create overrides temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }() // no-op after a successful rename
-
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write overrides temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close overrides temp file: %w", err)
-	}
-	// CreateTemp makes 0600; match the prior 0644 so the file stays readable.
-	if err := os.Chmod(tmpName, 0644); err != nil {
-		return fmt.Errorf("chmod overrides temp file: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename overrides temp file into place: %w", err)
+	// Atomic temp+rename (see atomicfile.WriteFile): a crash mid-write can't
+	// corrupt the file, and concurrent writers (e.g. two dashboard tabs) don't
+	// clobber each other's temp. writeMu above additionally serializes the
+	// load-merge-write so neither loses the other's keys.
+	if err := atomicfile.WriteFile(path, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("write overrides: %w", err)
 	}
 	return nil
 }
