@@ -101,12 +101,13 @@ func renderTransfer(t *putio.Transfer, ctx *download.TransferContext, category s
 		dto.LifecycleState = "None"
 	}
 
-	// Error precedence (copy torrent.go:handleTorrentGet): plundrio's permanent
-	// failure string wins over put.io's ErrorMessage. error_string =
-	// prog.Error if the cascade marked it permanent, else put.io's ErrorMessage.
-	// A transient Failed (still retrying) reports error:false and stays
+	// Error precedence (shared with torrent.go:handleTorrentGet via
+	// transferprog): plundrio's permanent failure string wins over put.io's own
+	// error fields. error_string = prog.Error if the cascade marked it
+	// permanent, else put.io's synthesized reason (tracker/error/status). A
+	// transient Failed (still retrying) reports error:false and stays
 	// mid-progress, identical to the RPC path.
-	errString := t.ErrorMessage
+	errString := transferprog.PutioErrorString(t)
 	if prog.Error != "" {
 		errString = prog.Error
 	}

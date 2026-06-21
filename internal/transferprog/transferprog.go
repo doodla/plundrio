@@ -13,8 +13,10 @@
 package transferprog
 
 import (
+	"strings"
 	"time"
 
+	"github.com/doodla/go-putio"
 	"github.com/doodla/plundrio/internal/download"
 )
 
@@ -156,6 +158,50 @@ func calculateProgressWithContext(in Input) Result {
 	}
 
 	return result
+}
+
+// PutioErrorString synthesizes a human-readable failure reason from a put.io
+// transfer's error fields, shared by the RPC server (Transmission errorString)
+// and the dashboard (error_string) so both faces report the same reason. When
+// put.io marks a transfer ERROR (DMCA takedown, dead torrent, tracker ban), the
+// reason lives in tracker_message / error_message / status_message; without
+// surfacing it Sonarr/Radarr only see a generic "stopped" and silently drop the
+// grab (see #22).
+//
+// Field handling differs by how trustworthy each field is as an error signal:
+//
+//   - ErrorMessage is only populated when put.io errors a transfer, so it is
+//     always safe to surface.
+//   - TrackerMessage and StatusMessage are freeform and carry benign text in
+//     healthy states (tracker announce stats, "getting metadata", ...), so they
+//     are only consulted once put.io has actually marked the transfer ERROR —
+//     otherwise we'd flip error=true on a working transfer.
+//
+// In the ERROR state the distinct messages are joined in precedence order
+// (tracker > error > status): the tracker message (e.g. a DMCA notice or
+// "torrent not found") is the most actionable, then put.io's own ErrorMessage,
+// then its freeform StatusMessage. De-duping avoids repeating a reason put.io
+// copies across fields.
+//
+// Note this is put.io's own error reason. plundrio's permanent-failure cascade
+// (Result.Error) still takes precedence at the call sites when set, because it
+// reflects the terminal local decision *arr should act on.
+func PutioErrorString(t *putio.Transfer) string {
+	if t.Status != "ERROR" {
+		return t.ErrorMessage
+	}
+
+	seen := make(map[string]bool, 3)
+	var parts []string
+	for _, m := range []string{t.TrackerMessage, t.ErrorMessage, t.StatusMessage} {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		parts = append(parts, m)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // MapPutioStatusValue maps a Put.io transfer status string to a Transmission status code.
