@@ -496,7 +496,12 @@ var getTokenCmd = &cobra.Command{
 			case <-ticker.C:
 				tokenResp, err := http.Get("https://api.put.io/v2/oauth2/oob/code/" + codeResponse.Code)
 				if err != nil {
-					log.Fatal("auth").Err(err).Msg("Failed to check authorization status")
+					// A transient network blip during the (up to 5-minute) poll
+					// must not abort the whole flow — the user may still be
+					// entering the code. Log and retry on the next tick; the
+					// ctx.Done() case enforces the overall timeout.
+					log.Warn("auth").Err(err).Msg("Failed to check authorization status, retrying")
+					continue
 				}
 
 				var tokenResult struct {
