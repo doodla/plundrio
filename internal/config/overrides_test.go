@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -249,6 +250,52 @@ func TestWriteOverrideLeavesNoTempFiles(t *testing.T) {
 	for _, e := range entries {
 		if e.Name() != "overrides.json" {
 			t.Errorf("unexpected leftover file: %q", e.Name())
+		}
+	}
+}
+
+// TestWriteOverrideConcurrentNoLostUpdates hammers WriteOverride from many
+// goroutines, each persisting a distinct key. Serialized load-merge-write means
+// every key must survive — without the lock, concurrent writers would read the
+// same base and clobber each other (lost update), leaving only one key.
+func TestWriteOverrideConcurrentNoLostUpdates(t *testing.T) {
+	clearPLDREnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overrides.json")
+
+	// Distinct persistable keys with distinct values.
+	type kv struct {
+		key string
+		val any
+	}
+	writes := []kv{
+		{"workers", 7},
+		{"log_level", "debug"},
+		{"token", "secret"},
+		{"listen", ":9091"},
+		{"dashboard_addr", ":9092"},
+		{"folder", "media"},
+	}
+
+	var wg sync.WaitGroup
+	for _, w := range writes {
+		wg.Add(1)
+		go func(w kv) {
+			defer wg.Done()
+			if err := WriteOverride(path, map[string]any{w.key: w.val}); err != nil {
+				t.Errorf("WriteOverride(%s): %v", w.key, err)
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	ov, err := LoadOverrides(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	for _, w := range writes {
+		if _, ok := ov[w.key]; !ok {
+			t.Errorf("key %q missing after concurrent writes (lost update)", w.key)
 		}
 	}
 }
