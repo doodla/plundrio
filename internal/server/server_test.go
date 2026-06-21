@@ -4,7 +4,31 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/doodla/go-putio"
 )
+
+// TestCheckDiskQuotaZeroSize guards against the division-by-zero edge case:
+// an account reporting Disk.Size == 0 (unlimited plan, or a zero-value Disk
+// from an API hiccup) must not produce a NaN/+Inf percentage and a spurious
+// "over quota" result.
+func TestCheckDiskQuotaZeroSize(t *testing.T) {
+	acc := &putio.AccountInfo{Username: "u"}
+	acc.Disk.Size = 0
+	acc.Disk.Used = 1234 // Used>0, Size==0 would be +Inf% without the guard
+	srv := newTestServer(t, &fakePutioClient{accountInfo: acc}, newFakeDownloadService())
+
+	over, err := srv.checkDiskQuota()
+	if err != nil {
+		t.Fatalf("checkDiskQuota: %v", err)
+	}
+	if over {
+		t.Error("over quota = true for zero-size disk, want false")
+	}
+	if srv.quotaWarning.Load() {
+		t.Error("quotaWarning set for zero-size disk, want unset")
+	}
+}
 
 // TestServerStartReturnsNilOnCleanStop guards the regression where Start
 // returned http.ErrServerClosed on a normal Stop. main.go log.Fatals on any

@@ -14,6 +14,14 @@ func (s *Server) checkDiskQuota() (bool, error) {
 		return false, fmt.Errorf("failed to check disk quota: %w", err)
 	}
 
+	// Guard against Disk.Size == 0 (unlimited plans report 0, and a zero-value
+	// Disk can come back from an API hiccup). Float division by zero would yield
+	// NaN/+Inf — a Used>0 case would then log a bogus "over quota (+Inf% used)"
+	// warning. With no known size we can't be over quota, so report false.
+	if account.Disk.Size <= 0 {
+		return false, nil
+	}
+
 	// Calculate usage percentage
 	usagePercent := float64(account.Disk.Used) / float64(account.Disk.Size) * 100
 
